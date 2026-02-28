@@ -1,0 +1,1002 @@
+<?php
+
+class Database{
+    private $host = 'localhost';
+    private $db_name = 'samdu_systemdb';
+    private $username = 'root';
+    private $password = '';
+    private $link;
+    function __construct() {
+        $this->link = mysqli_connect($this->host, $this->username, $this->password, $this->db_name);
+        if (!$this->link) {
+            exit("Bazaga ulanmadi!");
+        }
+        // Izoh: Umumta'lim fanlar jadvali mavjud bo'lmasa avtomatik yaratish.
+        mysqli_query($this->link, "
+            CREATE TABLE IF NOT EXISTS umumtalim_fanlar (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                fan_code VARCHAR(100) NOT NULL,
+                fan_name VARCHAR(255) NOT NULL,
+                kafedra_id INT NOT NULL,
+                semestr INT NOT NULL,
+                create_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        ");
+        // Izoh: Umumta'lim fanlar jadvalida semestr ustuni yo'q bo'lsa qo'shamiz.
+        $semestrColumn = mysqli_query($this->link, "SHOW COLUMNS FROM umumtalim_fanlar LIKE 'semestr'");
+        if ($semestrColumn && mysqli_num_rows($semestrColumn) === 0) {
+            mysqli_query($this->link, "ALTER TABLE umumtalim_fanlar ADD COLUMN semestr INT NOT NULL DEFAULT 1 AFTER kafedra_id");
+        }
+        // Izoh: Umumta'lim fan biriktirish jadvali mavjud bo'lmasa avtomatik yaratish.
+        mysqli_query($this->link, "
+            CREATE TABLE IF NOT EXISTS umumtalim_fan_biriktirish (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                umumtalim_fan_id INT NOT NULL,
+                source_fan_id INT NULL,
+                yonalish_id INT NOT NULL,
+                semestr_id INT NOT NULL,
+                create_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE KEY uniq_biriktirish (umumtalim_fan_id, yonalish_id, semestr_id)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        ");
+        // Izoh: Biriktirish jadvalida asl tanlangan fan ID (source_fan_id) yo'q bo'lsa qo'shamiz.
+        $sourceFanColumn = mysqli_query($this->link, "SHOW COLUMNS FROM umumtalim_fan_biriktirish LIKE 'source_fan_id'");
+        if ($sourceFanColumn && mysqli_num_rows($sourceFanColumn) === 0) {
+            mysqli_query($this->link, "ALTER TABLE umumtalim_fan_biriktirish ADD COLUMN source_fan_id INT NULL AFTER umumtalim_fan_id");
+        }
+          // Izoh: Chet tili guruhlari jadvali mavjud bo'lmasa avtomatik yaratish.
+          mysqli_query($this->link, "
+              CREATE TABLE IF NOT EXISTS chet_tili_guruhlar (
+                  id INT AUTO_INCREMENT PRIMARY KEY,
+                  fan_id INT NOT NULL,
+                  yonalish_id INT NOT NULL,
+                  semestr_id INT NOT NULL,
+                  yonalish_ids TEXT NULL,
+                  source_fan_ids TEXT NULL,
+                  guruh_no INT NOT NULL,
+                  create_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                  UNIQUE KEY uniq_chet_tili (fan_id, yonalish_id, semestr_id, guruh_no)
+              ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+          ");
+          // Izoh: Yonalishlar birlashtirilishi uchun yonalish_ids ustuni yo'q bo'lsa qo'shamiz.
+          $yonalishIdsColumn = mysqli_query($this->link, "SHOW COLUMNS FROM chet_tili_guruhlar LIKE 'yonalish_ids'");
+          if ($yonalishIdsColumn && mysqli_num_rows($yonalishIdsColumn) === 0) {
+              mysqli_query($this->link, "ALTER TABLE chet_tili_guruhlar ADD COLUMN yonalish_ids TEXT NULL AFTER semestr_id");
+          }
+        // Izoh: Birlashtirishda asl tanlangan fan IDlar ro'yxati uchun source_fan_ids ustuni yo'q bo'lsa qo'shamiz.
+        $sourceFanIdsColumn = mysqli_query($this->link, "SHOW COLUMNS FROM chet_tili_guruhlar LIKE 'source_fan_ids'");
+        if ($sourceFanIdsColumn && mysqli_num_rows($sourceFanIdsColumn) === 0) {
+            mysqli_query($this->link, "ALTER TABLE chet_tili_guruhlar ADD COLUMN source_fan_ids TEXT NULL AFTER yonalish_ids");
+        }
+
+        // Izoh: Ishchi o'quv reja jadvali (tanlov fanlar uchun variantlar biriktiriladi).
+        mysqli_query($this->link, "
+            CREATE TABLE IF NOT EXISTS ishchi_oquv_reja (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                base_fan_id INT NOT NULL,
+                semestr_id INT NOT NULL,
+                create_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE KEY uniq_ishchi_reja (base_fan_id, semestr_id)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        ");
+        mysqli_query($this->link, "
+            CREATE TABLE IF NOT EXISTS ishchi_oquv_reja_variants (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                ishchi_reja_id INT NOT NULL,
+                fan_id INT NOT NULL,
+                create_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE KEY uniq_ishchi_variant (ishchi_reja_id, fan_id)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        ");
+    }
+    public function query($query) {
+        return mysqli_query($this->link, $query);
+    }
+    public function get_data_by_table($table, $arr, $con = 'no'){
+        $sql = "SELECT * FROM ".$table. " WHERE ";
+        $t = '';
+        $i=0;
+        $n = count($arr);
+        foreach($arr as $key=>$val){
+            $i++;
+            // Izoh: Maxsus belgilar sababli SQL xatosi chiqmasligi uchun qiymatni escapelaymiz.
+            if ($val === null) {
+                $condition = "$key IS NULL";
+            } else {
+                $safeVal = mysqli_real_escape_string($this->link, (string)$val);
+                $condition = "$key = '$safeVal'";
+            }
+
+            if($i==$n){
+                $t .= $condition;
+            }else{
+                $t .= $condition . " AND ";
+            }
+        }
+        $sql .= $t;
+        if ($con != 'no'){
+            $sql .= $con;
+        }
+        $fetch = mysqli_fetch_assoc($this->query($sql));
+        return $fetch;
+    }
+    public function get_data_by_table_all($table, $con = 'no'){
+        $sql = "SELECT * FROM ".$table;
+        if ($con != 'no'){
+            $sql .= " ".$con;
+        }
+        $result = $this->query($sql);
+        $data = [];
+        while ($row = mysqli_fetch_assoc($result)) {
+            $data[] = $row;
+        }
+        return $data;
+    }
+    public function insert($table, $arr){
+        $sql = "INSERT INTO ".$table. " ";
+        $t1 = '';
+        $t2 = '';
+        $i = 0;
+        $n = count($arr);
+        foreach($arr as $key=>$val){
+            $val = mysqli_real_escape_string($this->link, $val);
+            $i++;
+            if($i==$n){
+                $t1 .= $key;
+                $t2 .= "'".$val."'";
+            }else{
+                $t1 .= $key.', ';
+                $t2 .= "'".$val."', ";
+            }
+        }
+        $sql .= "($t1) VALUES ($t2);";
+        $result = $this->query($sql);
+
+        if ($result) {
+            return mysqli_insert_id($this->link);
+        } else {
+            return 0;
+        }
+    }
+    public function update($table, $arr, $con = 'no'){
+        $sql = "UPDATE ".$table. " SET ";
+        $t = '';
+        $i=0;
+        $n = count($arr);
+        foreach($arr as $key=>$val){
+            $val = addslashes($val);
+
+            $i++;
+            if($i==$n){
+                $t .= "$key = '$val'";
+            }else{
+                $t .= "$key = '$val', ";
+            }
+        }
+        $sql .= $t;
+        if ($con != 'no'){
+            $sql .= " WHERE ".$con;
+        }
+
+        return $this->query($sql);
+    }
+
+    public function delete($table, $con = 'no'){
+        $sql = "DELETE FROM ".$table;
+        if ($con != 'no'){
+            $sql .= " WHERE ".$con;
+        }
+        return $this -> query($sql);
+    }
+    public function get_yunalishlar_with_details(){
+        $sql = "SELECT 
+            y.id,
+            y.name            AS yonalish_nomi,
+            y.code            AS yonalish_kodi,
+            y.muddati         AS talim_muddati,
+            y.kirish_yili     AS kirish_yili,
+            ad.name           AS akademik_daraja,
+            ts.name           AS talim_shakli,
+            y.kvalifikatsiya,
+            f.name            AS fakultet,
+            y.create_at
+        FROM yonalishlar y
+        LEFT JOIN akademik_darajalar ad ON y.akademik_daraja_id = ad.id
+        LEFT JOIN talim_shakllar ts    ON y.talim_shakli_id = ts.id
+        LEFT JOIN fakultetlar f         ON y.fakultet_id = f.id
+        ORDER BY y.id DESC;
+        ";
+        $result = $this->query($sql);
+        $data = [];
+        while ($row = mysqli_fetch_assoc($result)) {
+            $data[] = $row;
+        }
+        return $data;
+
+    }
+    public function get_kafedralar(){
+        $sql = "SELECT k.id, k.name, k.create_at, f.name AS fakultet_name FROM `kafedralar` k
+        LEFT JOIN fakultetlar f ON k.fakultet_id = f.id
+        ";
+        $result = $this->query($sql);
+        $data = [];
+        while ($row = mysqli_fetch_assoc($result)) {
+            $data[] = $row;
+        }
+        return $data;
+    }
+    public function get_semestrlar(){
+        $sql = "SELECT 
+            s.id,
+            f.name AS fakultet_name,
+            y.name AS yonalish_name,
+            y.kirish_yili,
+            y.talim_shakli_id,
+            tsh.name AS talim_shakli_name,
+            y.patok_soni,
+            y.kattaguruh_soni,
+            y.kichikguruh_soni,
+            s.semestr,
+            s.create_at,
+            COALESCE(SUM(g.soni), 0) AS jami_talabalar,
+            COUNT(DISTINCT g.id) AS guruhlar_soni
+        FROM semestrlar s
+        LEFT JOIN fakultetlar f ON f.id = s.fakultet_id
+        LEFT JOIN yonalishlar y ON y.id = s.yonalish_id
+        LEFT JOIN talim_shakllar tsh ON tsh.id = y.talim_shakli_id
+        LEFT JOIN guruhlar g ON g.yonalish_id = y.id
+        GROUP BY
+            s.id,
+            f.name,
+            y.name,
+            y.kirish_yili,
+            y.talim_shakli_id,
+            tsh.name,
+            y.patok_soni,
+            y.kattaguruh_soni,
+            y.kichikguruh_soni,
+            s.semestr,
+            s.create_at;
+        ;";
+        $result = $this->query($sql);
+        $data = [];
+        while ($row = mysqli_fetch_assoc($result)) {
+            $data[] = $row;
+        }
+        return $data;
+    }
+    public function insert_semestrlar(){
+        $sql = "
+            INSERT IGNORE INTO semestrlar (fakultet_id, yonalish_id, semestr)
+            SELECT
+                y.fakultet_id,
+                y.id AS yonalish_id,
+                n.num AS semestr
+            FROM yonalishlar y
+            JOIN numbers n
+                ON n.num <= y.muddati * 2
+            WHERE y.muddati IS NOT NULL
+            AND y.muddati > 0
+        ";
+        $result = $this->query($sql);
+
+        return $result;
+    }
+    public function get_oquv_rejalar($filters = []){
+        $where = [];
+        if (!empty($filters['yonalish_id'])) {
+            $where[] = "y.id = " . (int)$filters['yonalish_id'];
+        }
+        if (!empty($filters['semestr'])) {
+            $where[] = "s.semestr = " . (int)$filters['semestr'];
+        }
+        $whereSQL = '';
+        if (!empty($where)) {
+            $whereSQL = 'WHERE ' . implode(' AND ', $where);
+        }
+        $sql = "
+                SELECT
+            s.id AS semestr_id,
+            s.semestr,
+            y.id AS yonalish_id,
+            y.name AS yonalish_name,
+            f.id AS fan_id,
+            f.fan_code,
+            f.fan_name,
+            f.tanlov_fan,
+            k.name AS kafedra_name,
+
+            SUM(CASE WHEN dst.id = 1 THEN o.dars_soat ELSE 0 END) AS lecture,
+            SUM(CASE WHEN dst.id = 2 THEN o.dars_soat ELSE 0 END) AS practical,
+            SUM(CASE WHEN dst.id = 3 THEN o.dars_soat ELSE 0 END) AS lab,
+            SUM(CASE WHEN dst.id = 4 THEN o.dars_soat ELSE 0 END) AS seminar,
+            SUM(CASE WHEN dst.id = 5 THEN o.dars_soat ELSE 0 END) AS mustaqilTalim,
+            SUM(CASE WHEN dst.name = 'Kurs ishi' THEN o.dars_soat ELSE 0 END) AS kursIshi,
+            SUM(CASE WHEN dst.name = 'Malaka amaliyoti' THEN o.dars_soat ELSE 0 END) AS malakaAmaliyot
+
+        FROM oquv_rejalar o
+        JOIN fanlar f ON f.id = o.fan_id
+        JOIN dars_soat_turlar dst ON dst.id = o.dars_tur_id
+        JOIN semestrlar s ON s.id = f.semestr_id
+        JOIN yonalishlar y ON y.id = s.yonalish_id
+        LEFT JOIN kafedralar k ON k.id = f.kafedra_id
+        $whereSQL
+        GROUP BY
+            f.id,
+            s.id,
+            s.semestr,
+            y.id,
+            y.name,
+            f.fan_code,
+            f.fan_name,
+            f.tanlov_fan,
+            k.name
+
+        ORDER BY
+            s.semestr,
+            f.fan_code,
+            f.fan_name;
+        ";
+        $result = $this->query($sql);
+        $data = [];
+        while ($row = mysqli_fetch_assoc($result)) {
+            $data[] = $row;
+        }
+        return $data;
+    }
+    public function get_guruhlar(){
+        $sql = "SELECT g.id, g.guruh_nomer, g.soni, g.create_at, y.name AS yonalish_name FROM guruhlar g
+        JOIN yonalishlar y ON y.id = g.yonalish_id ";
+        $result = $this->query($sql);
+        $data = [];
+        while ($row = mysqli_fetch_assoc($result)) {
+            $data[] = $row;
+        }
+        return $data;
+    }
+    public function get_oqtuvchi_total_hours($teacher_id){
+        $sql = "SELECT 
+            t.id,
+            t.soat,
+            t.type,
+            o.fio,
+            o.lavozim,
+            f.fan_name,
+            f.fan_code,
+            dst.name AS dars_turi,
+            r.dars_soat
+        FROM taqsimotlar t
+        JOIN oqituvchilar o ON o.id = t.teacher_id
+        JOIN oquv_rejalar r ON r.id = t.oquv_reja_id
+        JOIN dars_soat_turlar dst ON dst.id = r.dars_tur_id
+        JOIN fanlar f ON f.id = r.fan_id
+        WHERE t.teacher_id = $teacher_id
+        ";
+        $result = $this->query($sql);
+        $details = [];
+        $totalHours = 0;
+        $fio = '';
+        $lavozim = '';
+
+        while ($row = mysqli_fetch_assoc($result)) {
+            $details[] = $row;
+            $totalHours += (float)$row['soat'];
+            $fio = $row['fio'];
+            $lavozim = $row['lavozim'];
+        }
+
+        return [
+            'fio' => $fio,
+            'lavozim' => $lavozim,
+            'total_hours' => $totalHours,
+            'details' => $details
+        ];
+    }
+    public function get_oquv_haftaliklar(){
+        $sql = "SELECT oh.*, y.name as yonalish_nomi, y.code as yonalish_code, y.muddati 
+            FROM oquv_haftaliklar oh 
+            JOIN yonalishlar y ON oh.yonalish_id = y.id 
+            ORDER BY oh.create_at DESC";
+        $result = $this->query($sql);
+        $data = [];
+        while ($row = mysqli_fetch_assoc($result)) {
+            $data[] = $row;
+        }
+        return $data;
+    }
+    public function get_talaba_soni($semestr_id){
+        $sql = "SELECT COALESCE(SUM(g.soni),0) AS talabalar_soni
+        FROM guruhlar g
+        WHERE g.yonalish_id = (
+            SELECT yonalish_id FROM semestrlar WHERE id = $semestr_id
+        );";
+        $result = $this->query($sql);
+        $data = mysqli_fetch_assoc($result);
+        return $data;
+    }
+    public function get_taqsimot_by_teacher($oquvreja_id, $type){
+        $sql = "SELECT t.id, t.soat as soat_soni, t.type, o.fio, o.lavozim, t.oquv_reja_id
+        FROM `taqsimotlar` t 
+        JOIN oqituvchilar o ON o.id = t.teacher_id
+        WHERE t.oquv_reja_id=$oquvreja_id AND t.type='$type';";
+        $result = $this->query($sql);
+        $data = [];
+        while ($row = mysqli_fetch_assoc($result)) {
+            $data[] = $row;
+        }
+        return $data;
+    }
+
+    public function get_oquv_yuklamalar($filters = []){
+        // Izoh: Filtrlar uchun SQL bo'laklari (kafedra va semestr).
+        $filterKafedra = '';
+        $filterSemestr = '';
+        $filterSemestrLecture = '';
+        if (!empty($filters['kafedra_id'])) {
+            $filterKafedra = " AND k.id = " . (int)$filters['kafedra_id'];
+        }
+        if (!empty($filters['semestr'])) {
+            $filterSemestr = " AND s.semestr = " . (int)$filters['semestr'];
+            $filterSemestrLecture = " AND ul.semestr = " . (int)$filters['semestr'];
+        }
+
+        // Izoh: Umumta'lim biriktirishda ma'ruza bitta, qolgan darslar yo'nalish bo'yicha alohida chiqishi uchun UNION ishlatiladi.
+        $sql = "
+            WITH fan_reja AS (
+                SELECT
+                    f.id AS fan_id,
+                    f.fan_name,
+                    f.fan_code,
+                    f.semestr_id,
+                    f.kafedra_id,
+
+                    SUM(CASE WHEN r.dars_tur_id = 1 THEN r.dars_soat ELSE 0 END) AS maruza_soat,
+                    SUM(CASE WHEN r.dars_tur_id = 2 THEN r.dars_soat ELSE 0 END) AS amaliy_soat,
+                    SUM(CASE WHEN r.dars_tur_id = 3 THEN r.dars_soat ELSE 0 END) AS laboratoriya_soat,
+                    SUM(CASE WHEN r.dars_tur_id = 4 THEN r.dars_soat ELSE 0 END) AS seminar_soat
+
+                FROM fanlar f
+                JOIN oquv_rejalar r ON r.fan_id = f.id
+                GROUP BY f.id, f.fan_name, f.fan_code, f.semestr_id, f.kafedra_id
+            ),
+            fan_reja_umum AS (
+                SELECT
+                    f.fan_code,
+                    f.fan_name,
+                    f.kafedra_id,
+                    s.semestr,
+                    MAX(CASE WHEN r.dars_tur_id = 1 THEN r.dars_soat ELSE 0 END) AS maruza_soat,
+                    MAX(CASE WHEN r.dars_tur_id = 2 THEN r.dars_soat ELSE 0 END) AS amaliy_soat,
+                    MAX(CASE WHEN r.dars_tur_id = 3 THEN r.dars_soat ELSE 0 END) AS laboratoriya_soat,
+                    MAX(CASE WHEN r.dars_tur_id = 4 THEN r.dars_soat ELSE 0 END) AS seminar_soat
+                FROM fanlar f
+                JOIN oquv_rejalar r ON r.fan_id = f.id
+                JOIN semestrlar s ON s.id = f.semestr_id
+                GROUP BY f.fan_code, f.fan_name, f.kafedra_id, s.semestr
+            ),
+            guruh_agg AS (
+                SELECT
+                    yonalish_id,
+                    GROUP_CONCAT(guruh_nomer SEPARATOR '-') AS guruh_raqami,
+                    COUNT(id) AS guruhlar_soni,
+                    SUM(soni) AS talabalar_soni
+                FROM guruhlar
+                GROUP BY yonalish_id
+            ),
+            umumtalim_birik AS (
+                SELECT
+                    ub.umumtalim_fan_id,
+                    ub.semestr_id,
+                    ub.yonalish_id,
+                    uf.fan_code,
+                    uf.fan_name,
+                    uf.kafedra_id
+                FROM umumtalim_fan_biriktirish ub
+                JOIN umumtalim_fanlar uf ON uf.id = ub.umumtalim_fan_id
+            ),
+            umumtalim_lecture AS (
+                SELECT
+                    ub.umumtalim_fan_id,
+                    ub.fan_code,
+                    ub.fan_name,
+                    ub.kafedra_id,
+                    s.semestr,
+                    FLOOR((s.semestr + 1)/2) AS kurs,
+                    GROUP_CONCAT(DISTINCT g.guruh_nomer ORDER BY g.guruh_nomer SEPARATOR '-') AS guruh_raqami,
+                    COUNT(DISTINCT g.id) AS guruhlar_soni,
+                    SUM(g.soni) AS talabalar_soni,
+                    GROUP_CONCAT(DISTINCT y.code ORDER BY y.code SEPARATOR ', ') AS yonalish_code,
+                    GROUP_CONCAT(DISTINCT CONCAT(y.name, ' - ', y.kirish_yili) ORDER BY y.code SEPARATOR ' | ') AS talim_yonalishi,
+                    GROUP_CONCAT(DISTINCT tsh.name ORDER BY tsh.name SEPARATOR ' | ') AS oquv_shakli
+                FROM umumtalim_birik ub
+                JOIN semestrlar s ON s.id = ub.semestr_id
+                JOIN yonalishlar y ON y.id = ub.yonalish_id
+                JOIN talim_shakllar tsh ON tsh.id = y.talim_shakli_id
+                JOIN guruhlar g ON g.yonalish_id = y.id
+                GROUP BY ub.umumtalim_fan_id, s.semestr
+            )
+
+            SELECT *
+            FROM (
+                -- Izoh: Oddiy fanlar (umumta'lim biriktirilmaganlar).
+                SELECT
+                    fr.fan_name,
+                    y.name AS talim_yonalishi,
+                    y.code AS yonalish_code,
+                    k.name AS kafedra_nomi,
+                    tsh.name AS oquv_shakli,
+                    s.semestr,
+                    FLOOR((s.semestr + 1)/2) AS kurs,
+
+                    ga.guruh_raqami,
+                    ga.guruhlar_soni,
+                    ga.talabalar_soni,
+
+                    y.patok_soni,
+                    y.kattaguruh_soni,
+                    y.kichikguruh_soni,
+
+                    fr.maruza_soat,
+                    fr.amaliy_soat,
+                    fr.laboratoriya_soat,
+                    fr.seminar_soat,
+                    fr.maruza_soat * y.patok_soni AS amalda_maruz,
+                    fr.amaliy_soat * y.kattaguruh_soni AS amalda_amaliy,
+                    fr.laboratoriya_soat * y.kichikguruh_soni AS amalda_lab,
+                    fr.seminar_soat * y.kattaguruh_soni AS amalda_seminar,
+                    fr.maruza_soat * y.patok_soni
+                    + fr.amaliy_soat * y.kattaguruh_soni
+                    + fr.laboratoriya_soat * y.kichikguruh_soni
+                    + fr.seminar_soat * y.kattaguruh_soni
+                    AS jami_soat
+                FROM fan_reja fr
+                JOIN semestrlar s ON s.id = fr.semestr_id
+                JOIN yonalishlar y ON y.id = s.yonalish_id
+                JOIN talim_shakllar tsh ON tsh.id = y.talim_shakli_id
+                JOIN kafedralar k ON k.id = fr.kafedra_id
+                JOIN guruh_agg ga ON ga.yonalish_id = y.id
+                WHERE NOT EXISTS (
+                    SELECT 1
+                    FROM umumtalim_birik ub
+                    WHERE ub.semestr_id = fr.semestr_id
+                      AND ub.fan_code = fr.fan_code
+                      AND ub.fan_name = fr.fan_name
+                      AND ub.kafedra_id = fr.kafedra_id
+                )
+                $filterKafedra
+                $filterSemestr
+
+                UNION ALL
+
+                -- Izoh: Umumta'lim fanlari uchun birlashtirilgan MA'RUZA satri.
+                SELECT
+                    ul.fan_name,
+                    ul.talim_yonalishi,
+                    ul.yonalish_code,
+                    k.name AS kafedra_nomi,
+                    ul.oquv_shakli,
+                    ul.semestr,
+                    ul.kurs,
+
+                    ul.guruh_raqami,
+                    ul.guruhlar_soni,
+                    ul.talabalar_soni,
+
+                    1 AS patok_soni,
+                    0 AS kattaguruh_soni,
+                    0 AS kichikguruh_soni,
+
+                    fru.maruza_soat,
+                    0 AS amaliy_soat,
+                    0 AS laboratoriya_soat,
+                    0 AS seminar_soat,
+                    fru.maruza_soat AS amalda_maruz,
+                    0 AS amalda_amaliy,
+                    0 AS amalda_lab,
+                    0 AS amalda_seminar,
+                    fru.maruza_soat AS jami_soat
+                FROM umumtalim_lecture ul
+                JOIN fan_reja_umum fru
+                    ON fru.fan_code = ul.fan_code
+                   AND fru.fan_name = ul.fan_name
+                   AND fru.kafedra_id = ul.kafedra_id
+                   AND fru.semestr = ul.semestr
+                JOIN kafedralar k ON k.id = ul.kafedra_id
+                WHERE 1=1
+                $filterKafedra
+                $filterSemestrLecture
+
+                UNION ALL
+
+                -- Izoh: Umumta'lim fanlari uchun AMALIY/LAB/SEMINAR satrlari (yo'nalish bo'yicha alohida).
+                SELECT
+                    fru.fan_name,
+                    y.name AS talim_yonalishi,
+                    y.code AS yonalish_code,
+                    k.name AS kafedra_nomi,
+                    tsh.name AS oquv_shakli,
+                    s.semestr,
+                    FLOOR((s.semestr + 1)/2) AS kurs,
+
+                    ga.guruh_raqami,
+                    ga.guruhlar_soni,
+                    ga.talabalar_soni,
+
+                    y.patok_soni,
+                    y.kattaguruh_soni,
+                    y.kichikguruh_soni,
+
+                    0 AS maruza_soat,
+                    fru.amaliy_soat,
+                    fru.laboratoriya_soat,
+                    fru.seminar_soat,
+                    0 AS amalda_maruz,
+                    fru.amaliy_soat * y.kattaguruh_soni AS amalda_amaliy,
+                    fru.laboratoriya_soat * y.kichikguruh_soni AS amalda_lab,
+                    fru.seminar_soat * y.kattaguruh_soni AS amalda_seminar,
+                    fru.amaliy_soat * y.kattaguruh_soni
+                    + fru.laboratoriya_soat * y.kichikguruh_soni
+                    + fru.seminar_soat * y.kattaguruh_soni
+                    AS jami_soat
+                FROM umumtalim_birik ub
+                JOIN fan_reja_umum fru
+                    ON fru.fan_code = ub.fan_code
+                   AND fru.fan_name = ub.fan_name
+                   AND fru.kafedra_id = ub.kafedra_id
+                JOIN semestrlar s ON s.id = ub.semestr_id
+                JOIN yonalishlar y ON y.id = ub.yonalish_id
+                JOIN talim_shakllar tsh ON tsh.id = y.talim_shakli_id
+                JOIN kafedralar k ON k.id = ub.kafedra_id
+                JOIN guruh_agg ga ON ga.yonalish_id = y.id
+                WHERE fru.semestr = s.semestr
+                $filterKafedra
+                $filterSemestr
+            ) AS yuklama
+            ORDER BY yuklama.semestr, yuklama.fan_name;
+        ";
+        $result = $this->query($sql);
+        $data = [];
+        while ($row = mysqli_fetch_assoc($result)) {
+            $data[] = $row;
+        }
+        return $data;
+    }
+    public function get_qoshimcha_oquv_yuklamalar($filters = []){
+        $where = [];
+        if (!empty($filters['kafedra_id'])) {
+            $where[] = "k.id = " . (int)$filters['kafedra_id'];
+        }
+        if (!empty($filters['semestr'])) {
+            $where[] = "s.semestr = " . (int)$filters['semestr'];
+        }
+        $whereSQL = '';
+        if (!empty($where)) {
+            $whereSQL = 'WHERE ' . implode(' AND ', $where);
+        }        
+        $sql = "
+            WITH guruh_agg AS (
+                SELECT
+                    yonalish_id,
+                    GROUP_CONCAT(guruh_nomer SEPARATOR '-') AS guruh_raqami,
+                    COUNT(id) AS guruhlar_soni,
+                    SUM(soni) AS talabalar_soni
+                FROM guruhlar
+                GROUP BY yonalish_id
+            )
+
+            SELECT
+                qdt.name AS fan_nomi,  
+                y.name AS talim_yonalishi,
+                y.code AS yonalish_code,
+                k.name AS kafedra_nomi,
+                tsh.name AS oquv_shakli,
+                s.semestr,
+                FLOOR((s.semestr + 1)/2) AS kurs,
+
+                ga.guruh_raqami,
+                ga.guruhlar_soni,
+                ga.talabalar_soni,
+                SUM(CASE WHEN qdt.id = 20 THEN q.dars_soati ELSE 0 END) AS oraliq_nazorat,
+                SUM(CASE WHEN qdt.id = 21 THEN q.dars_soati ELSE 0 END) AS yakuniy_nazorat,
+                y.patok_soni,
+                y.kattaguruh_soni,
+                y.kichikguruh_soni,
+                SUM(CASE WHEN qdt.id = 1 THEN q.dars_soati ELSE 0 END) AS kurs_ishi,
+                SUM(CASE WHEN qdt.id = 2 THEN q.dars_soati ELSE 0 END) AS kurs_loyiha,
+                SUM(CASE WHEN qdt.id = 3 THEN q.dars_soati ELSE 0 END) AS oquv_ped_amaliyot,
+                SUM(CASE WHEN qdt.id = 4 THEN q.dars_soati ELSE 0 END) AS uzluksiz_malakaviy,
+                SUM(CASE WHEN qdt.id = 5 THEN q.dars_soati ELSE 0 END) AS dala_amaliyoti_otm,
+                SUM(CASE WHEN qdt.id = 6 THEN q.dars_soati ELSE 0 END) AS dala_amaliyoti_tashqarida,
+                SUM(CASE WHEN qdt.id = 7 THEN q.dars_soati ELSE 0 END) AS ishlab_chiqarish,
+                SUM(CASE WHEN qdt.id = 8 THEN q.dars_soati ELSE 0 END) AS bmi_rahbarligi,
+                SUM(CASE WHEN qdt.id = 9 THEN q.dars_soati ELSE 0 END) AS ilmiy_tadqiqot_ishi,
+                SUM(CASE WHEN qdt.id = 10 THEN q.dars_soati ELSE 0 END) AS ilmiy_pedagogik_ishi,
+                SUM(CASE WHEN qdt.id = 11 THEN q.dars_soati ELSE 0 END) AS ilmiy_stajirovka,
+                SUM(CASE WHEN qdt.id = 12 THEN q.dars_soati ELSE 0 END) AS tayanch_doktorantura,
+                SUM(CASE WHEN qdt.id = 13 THEN q.dars_soati ELSE 0 END) AS katta_ilmiy_tadqiqotchi,
+                SUM(CASE WHEN qdt.id = 14 THEN q.dars_soati ELSE 0 END) AS stajyor_tadqiqotchi,
+                SUM(CASE WHEN qdt.id = 15 THEN q.dars_soati ELSE 0 END) AS ochiq_dars,
+                SUM(CASE WHEN qdt.id = 16 THEN q.dars_soati ELSE 0 END) AS yadak,
+                SUM(CASE WHEN qdt.id = 17 THEN q.dars_soati ELSE 0 END) AS boshqa_soatlar,
+
+                SUM(q.dars_soati) AS jami_soat
+
+            FROM qoshimcha_oquv_rejalar q
+            JOIN qoshimcha_fanlar qf ON qf.id = q.qoshimcha_fanid
+            JOIN qoshimcha_dars_turlar qdt ON qdt.id = qf.qoshimcha_dars_id
+
+            JOIN semestrlar s ON s.id = qf.semestr_id
+            JOIN yonalishlar y ON y.id = s.yonalish_id
+            JOIN talim_shakllar tsh ON tsh.id = y.talim_shakli_id
+            JOIN kafedralar k ON k.id = q.kafedra_id
+            JOIN guruh_agg ga ON ga.yonalish_id = y.id
+            $whereSQL
+            GROUP BY qf.id, q.kafedra_id
+
+            ORDER BY s.semestr, qdt.name;
+        ";
+        $result = $this->query($sql);
+        $data = [];
+        while ($row = mysqli_fetch_assoc($result)) {
+            $data[] = $row;
+        }
+        return $data;
+    }
+    public function get_oqtuvchilar(){
+        $sql = "SELECT o.*, f.name AS fakultet_name, k.name AS kafedra_name, iu.name AS ilmiy_unvon_name, isht.name AS ishtur_name, id.name AS ilmiy_daraja_name
+        FROM `oqituvchilar` o
+        JOIN fakultetlar f ON f.id=o.fakultet_id
+        JOIN kafedralar k ON k.id=o.kafedra_id
+        JOIN ilmiy_unvonlar iu ON iu.id=o.ilmiy_unvon_id
+        JOIN ilmiy_darajalar id ON id.id=o.ilmiy_daraja_id
+        JOIN ish_turlar isht ON isht.id=o.ishtur_id;";
+        $result = $this->query($sql);
+        $data = [];
+        while ($row = mysqli_fetch_assoc($result)) {
+            $data[] = $row;
+        }
+        return $data;
+    }
+    public function get_oquv_taqsimotlar($filters=[]){
+        $where = [];
+        if (!empty($filters['kafedra_id'])) {
+            $where[] = "k.id = " . (int)$filters['kafedra_id'];
+        }
+        if (!empty($filters['semestr'])) {
+            $where[] = "s.semestr = " . (int)$filters['semestr'];
+        }
+        $whereSQL = '';
+        if (!empty($where)) {
+            $whereSQL = 'WHERE ' . implode(' AND ', $where);
+        }        
+        $sql = "WITH fan_reja AS (
+            SELECT
+                f.id AS fan_id,
+                f.fan_name,
+                f.fan_code,
+                f.semestr_id,
+                f.kafedra_id,
+
+                MAX(CASE WHEN r.dars_tur_id = 1 THEN r.id END) AS maruza_reja_id,
+                MAX(CASE WHEN r.dars_tur_id = 2 THEN r.id END) AS amaliy_reja_id,
+                MAX(CASE WHEN r.dars_tur_id = 3 THEN r.id END) AS laboratoriya_reja_id,
+                MAX(CASE WHEN r.dars_tur_id = 4 THEN r.id END) AS seminar_reja_id,
+
+                SUM(CASE WHEN r.dars_tur_id = 1 THEN r.dars_soat ELSE 0 END) AS maruza_soat,
+                SUM(CASE WHEN r.dars_tur_id = 2 THEN r.dars_soat ELSE 0 END) AS amaliy_soat,
+                SUM(CASE WHEN r.dars_tur_id = 3 THEN r.dars_soat ELSE 0 END) AS laboratoriya_soat,
+                SUM(CASE WHEN r.dars_tur_id = 4 THEN r.dars_soat ELSE 0 END) AS seminar_soat
+
+            FROM fanlar f
+            JOIN oquv_rejalar r ON r.fan_id = f.id
+            GROUP BY f.id, f.fan_name, f.fan_code, f.semestr_id, f.kafedra_id
+        ),
+        guruh_agg AS (
+            SELECT
+                g.yonalish_id,
+                GROUP_CONCAT(DISTINCT g.guruh_nomer ORDER BY g.guruh_nomer SEPARATOR '-') AS guruh_raqami,
+                COUNT(DISTINCT g.id)  AS guruhlar_soni,
+                SUM(g.soni)           AS talabalar_soni
+            FROM guruhlar g
+            GROUP BY g.yonalish_id
+        )
+        SELECT
+            fr.maruza_reja_id,
+            fr.amaliy_reja_id,
+            fr.laboratoriya_reja_id,
+            fr.seminar_reja_id,
+            fr.fan_name AS fan_nomi,
+            y.name AS talim_yonalishi,
+            y.code AS yonalish_code,
+            k.name AS kafedra_nomi,
+            tsh.name AS oquv_shakli,
+            s.semestr,
+            FLOOR((s.semestr + 1) / 2) AS kurs,
+            ga.guruh_raqami,
+            ga.guruhlar_soni,
+            ga.talabalar_soni,
+            y.patok_soni,
+            y.kattaguruh_soni,
+            y.kichikguruh_soni,
+            fr.maruza_soat AS reja_maruz,
+            fr.amaliy_soat AS reja_amaliy,
+            fr.laboratoriya_soat AS reja_laboratoriya,
+            fr.seminar_soat AS reja_seminar,
+            fr.maruza_soat * y.patok_soni AS amalda_maruz,
+            fr.amaliy_soat * y.kattaguruh_soni AS amalda_amaliy,
+            fr.laboratoriya_soat * y.kichikguruh_soni AS amalda_laboratoriya,
+            fr.seminar_soat * y.kattaguruh_soni AS amalda_seminar,
+            fr.maruza_soat * y.patok_soni
+            + fr.amaliy_soat * y.kattaguruh_soni
+            + fr.laboratoriya_soat * y.kichikguruh_soni
+            + fr.seminar_soat * y.kattaguruh_soni
+            AS jami_soat
+        FROM fan_reja fr
+        JOIN semestrlar s ON s.id = fr.semestr_id
+        JOIN yonalishlar y ON y.id = s.yonalish_id
+        JOIN kafedralar k ON k.id = fr.kafedra_id
+        JOIN talim_shakllar tsh ON tsh.id = y.talim_shakli_id
+        JOIN guruh_agg ga ON ga.yonalish_id = y.id
+        $whereSQL
+        ORDER BY s.semestr, fr.fan_name;
+        ";
+
+        $result = $this->query($sql);
+        $data = [];
+        while ($row = mysqli_fetch_assoc($result)) {
+            $data[] = $row;
+        }
+        return $data;
+    }
+    public function get_qoshimcha_oquv_taqsimotlar($filters = []){
+        $where = [];
+        if (!empty($filters['kafedra_id'])) {
+            $where[] = "k.id = " . (int)$filters['kafedra_id'];
+        }
+        if (!empty($filters['semestr'])) {
+            $where[] = "s.semestr = " . (int)$filters['semestr'];
+        }
+        if (!empty($filters['qoshimcha_oquv_reja_id'])){
+            $where[] = "q.id = " . (int)$filters['qoshimcha_oquv_reja_id'];
+        }
+        $whereSQL = '';
+        if (!empty($where)) {
+            $whereSQL = 'WHERE ' . implode(' AND ', $where);
+        } 
+        $sql = "
+            WITH guruh_agg AS (
+                SELECT
+                    yonalish_id,
+                    GROUP_CONCAT(DISTINCT guruh_nomer ORDER BY guruh_nomer SEPARATOR '-') AS guruh_raqami,
+                    COUNT(DISTINCT id) AS guruhlar_soni,
+                    SUM(soni) AS talabalar_soni
+                FROM guruhlar
+                GROUP BY yonalish_id
+            )
+            SELECT
+                q.id AS qoshimcha_reja_id, 
+                qf.fan_name AS fan_nomi,
+                y.name AS talim_yonalishi,
+                y.code AS yonalish_code,
+                k.name AS kafedra_nomi,
+                tsh.name AS oquv_shakli,
+                s.semestr,
+                FLOOR((s.semestr + 1)/2) AS kurs,
+
+                ga.guruh_raqami,
+                ga.guruhlar_soni,
+                ga.talabalar_soni,
+                CASE WHEN qf.qoshimcha_dars_id = 20 THEN q.dars_soati ELSE 0 END AS oraliq_nazorat,
+                CASE WHEN qf.qoshimcha_dars_id = 21 THEN q.dars_soati ELSE 0 END AS yakuniy_nazorat,
+                y.patok_soni,
+                y.kattaguruh_soni,
+                y.kichikguruh_soni,
+                CASE WHEN qf.qoshimcha_dars_id = 1  THEN q.dars_soati ELSE 0 END AS kurs_ishi,
+                CASE WHEN qf.qoshimcha_dars_id = 2  THEN q.dars_soati ELSE 0 END AS kurs_loyiha,
+                CASE WHEN qf.qoshimcha_dars_id = 3  THEN q.dars_soati ELSE 0 END AS oquv_ped_amaliyot,
+                CASE WHEN qf.qoshimcha_dars_id = 4  THEN q.dars_soati ELSE 0 END AS uzluksiz_malakaviy,
+                CASE WHEN qf.qoshimcha_dars_id = 5  THEN q.dars_soati ELSE 0 END AS dala_amaliyoti_otm,
+                CASE WHEN qf.qoshimcha_dars_id = 6  THEN q.dars_soati ELSE 0 END AS dala_amaliyoti_tashqarida,
+                CASE WHEN qf.qoshimcha_dars_id = 7  THEN q.dars_soati ELSE 0 END AS ishlab_chiqarish,
+                CASE WHEN qf.qoshimcha_dars_id = 8  THEN q.dars_soati ELSE 0 END AS bmi_rahbarligi,
+                CASE WHEN qf.qoshimcha_dars_id = 9  THEN q.dars_soati ELSE 0 END AS ilmiy_tadqiqot_ishi,
+                CASE WHEN qf.qoshimcha_dars_id = 10 THEN q.dars_soati ELSE 0 END AS ilmiy_pedagogik_ishi,
+                CASE WHEN qf.qoshimcha_dars_id = 11 THEN q.dars_soati ELSE 0 END AS ilmiy_stajirovka,
+                CASE WHEN qf.qoshimcha_dars_id = 12 THEN q.dars_soati ELSE 0 END AS tayanch_doktorantura,
+                CASE WHEN qf.qoshimcha_dars_id = 13 THEN q.dars_soati ELSE 0 END AS katta_ilmiy_tadqiqotchi,
+                CASE WHEN qf.qoshimcha_dars_id = 14 THEN q.dars_soati ELSE 0 END AS stajyor_tadqiqotchi,
+                CASE WHEN qf.qoshimcha_dars_id = 15 THEN q.dars_soati ELSE 0 END AS ochiq_dars,
+                CASE WHEN qf.qoshimcha_dars_id = 16 THEN q.dars_soati ELSE 0 END AS yadak,
+                CASE WHEN qf.qoshimcha_dars_id = 17 THEN q.dars_soati ELSE 0 END AS boshqa_soatlar,
+
+                q.dars_soati AS jami_soat
+            FROM qoshimcha_oquv_rejalar q
+            JOIN qoshimcha_fanlar qf ON qf.id = q.qoshimcha_fanid
+            JOIN semestrlar s ON s.id = qf.semestr_id
+            JOIN yonalishlar y ON y.id = s.yonalish_id
+            JOIN talim_shakllar tsh ON tsh.id = y.talim_shakli_id
+            JOIN kafedralar k ON k.id = q.kafedra_id
+            JOIN guruh_agg ga ON ga.yonalish_id = y.id
+            $whereSQL
+            ORDER BY s.semestr, q.id;
+        ";
+        
+        $result = $this->query($sql);
+        $data = [];
+        while ($row = mysqli_fetch_assoc($result)) {
+            $data[] = $row;
+        }
+        return $data;
+
+    }
+
+    public function get_oqituvchi_taqsimotlar($filters = []){
+        // Izoh: O'qituvchilar bo'yicha taqsimot soatlarini hisoblaymiz (A va Q turlari).
+        $where = [];
+        if (!empty($filters['kafedra_id'])) {
+            $where[] = "o.kafedra_id = " . (int)$filters['kafedra_id'];
+        }
+        if (!empty($filters['semestr'])) {
+            $where[] = "ts.semestr = " . (int)$filters['semestr'];
+        }
+        if (!empty($filters['oqituvchi_id'])) {
+            $where[] = "o.id = " . (int)$filters['oqituvchi_id'];
+        }
+        $whereSQL = '';
+        if (!empty($where)) {
+            $whereSQL = 'WHERE ' . implode(' AND ', $where);
+        }
+
+        $sql = "
+            WITH taqsimot_src AS (
+                SELECT
+                    t.teacher_id,
+                    t.soat,
+                    t.type,
+                    s.semestr
+                FROM taqsimotlar t
+                JOIN oquv_rejalar r ON r.id = t.oquv_reja_id
+                JOIN fanlar f ON f.id = r.fan_id
+                JOIN semestrlar s ON s.id = f.semestr_id
+                WHERE t.type = 'A'
+
+                UNION ALL
+
+                SELECT
+                    t.teacher_id,
+                    t.soat,
+                    t.type,
+                    s.semestr
+                FROM taqsimotlar t
+                JOIN qoshimcha_oquv_rejalar q ON q.id = t.oquv_reja_id
+                JOIN qoshimcha_fanlar qf ON qf.id = q.qoshimcha_fanid
+                JOIN semestrlar s ON s.id = qf.semestr_id
+                WHERE t.type = 'Q'
+            )
+            SELECT
+                o.id AS oqituvchi_id,
+                o.fio,
+                k.name AS kafedra_nomi,
+                SUM(ts.soat) AS jami_soat,
+                SUM(CASE WHEN ts.type = 'A' THEN ts.soat ELSE 0 END) AS asosiy_soat,
+                SUM(CASE WHEN ts.type = 'Q' THEN ts.soat ELSE 0 END) AS qoshimcha_soat
+            FROM taqsimot_src ts
+            JOIN oqituvchilar o ON o.id = ts.teacher_id
+            LEFT JOIN kafedralar k ON k.id = o.kafedra_id
+            $whereSQL
+            GROUP BY o.id, o.fio, k.name
+            ORDER BY jami_soat DESC, o.fio;
+        ";
+
+        $result = $this->query($sql);
+        $data = [];
+        while ($row = mysqli_fetch_assoc($result)) {
+            $data[] = $row;
+        }
+        return $data;
+    }
+
+  
+}
+
+?>
