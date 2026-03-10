@@ -252,12 +252,23 @@
                 .then(res => res.text())
                 .then(html => {
                     const tbody = document.getElementById('yonalishHistoryTable');
-                    tbody.innerHTML = html || '<tr><td colspan="12">Ma\'lumot topilmadi</td></tr>';
-                    document.getElementById('totalYonalishHistory').textContent = tbody.children.length + ' ta';
+                    const safeHtml = (html || '').trim();
+                    const noDataFromServer = /ma.?lumot topilmadi/i.test(safeHtml);
+                    if (safeHtml.length > 0 && !noDataFromServer) {
+                        tbody.innerHTML = safeHtml;
+                    } else {
+                        tbody.innerHTML = '<tr class="empty-row"><td colspan="12">Ma\'lumot topilmadi</td></tr>';
+                    }
+                    const totalRows = Array.from(tbody.querySelectorAll('tr')).filter((row) => {
+                        const text = (row.textContent || '').toLowerCase();
+                        return !row.classList.contains('empty-row') && !text.includes("ma'lumot topilmadi");
+                    }).length;
+                    document.getElementById('totalYonalishHistory').textContent = totalRows + ' ta';
                 })
                 .catch(() => {
                     document.getElementById('yonalishHistoryTable').innerHTML =
-                        '<tr><td colspan="12">Xatolik yuz berdi</td></tr>';
+                        '<tr class="empty-row"><td colspan="12">Xatolik yuz berdi</td></tr>';
+                    document.getElementById('totalYonalishHistory').textContent = '0 ta';
                 });
         }
         function setupModal() {
