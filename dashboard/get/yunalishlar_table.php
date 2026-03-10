@@ -17,7 +17,11 @@
         <td><?php echo htmlspecialchars($yunalish['fakultet']); ?></td>
         <td><?php echo htmlspecialchars($yunalish['create_at']); ?></td>
         <td>
-            <button class="btn btn-sm btn-warning editYunalishBtn" data-id="<?php echo $yunalish['id']; ?>">
+            <button
+                class="btn btn-sm btn-warning editYonalishBtn"
+                data-id="<?php echo $yunalish['id']; ?>"
+                onclick="openYonalishEdit(<?php echo (int)$yunalish['id']; ?>)"
+            >
                 <i class="fas fa-edit"></i> Tahrirlash
             </button>
             <button class="btn btn-sm btn-danger deleteYunalishBtn" data-id="<?php echo $yunalish['id']; ?>">

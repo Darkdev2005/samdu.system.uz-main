@@ -12,6 +12,15 @@ if (!empty($_POST['semestr'])) {
 if (!empty($_POST['oqituvchi_id'])) {
     $filters['oqituvchi_id'] = (int)$_POST['oqituvchi_id'];
 }
+if (!empty($_POST['shtat_turi_id'])) {
+    $filters['shtat_turi_id'] = (int)$_POST['shtat_turi_id'];
+}
+
+// Izoh: Qaysi bo'lim chiqishini boshqarish (taqsimot / report / full).
+$mode = $_POST['mode'] ?? 'taqsimot';
+$mode = in_array($mode, ['taqsimot', 'report', 'full'], true) ? $mode : 'taqsimot';
+$showTaqsimot = ($mode === 'taqsimot' || $mode === 'full');
+$showReport = ($mode === 'report' || $mode === 'full');
 
 // Izoh: Semestr juftligini aniqlash (1-2, 3-4, 5-6, 7-8).
 $pairStart = 1;
@@ -24,11 +33,15 @@ $pairEnd = $pairStart + 1;
 // Izoh: Filterlar uchun SQL bo'laklari (oqituvchi/kafedra).
 $whereTeacher = '';
 $whereKafedra = '';
+ $whereShtat = '';
 if (!empty($filters['oqituvchi_id'])) {
     $whereTeacher = " AND o.id = " . (int)$filters['oqituvchi_id'];
 }
 if (!empty($filters['kafedra_id'])) {
     $whereKafedra = " AND o.kafedra_id = " . (int)$filters['kafedra_id'];
+}
+if (!empty($filters['shtat_turi_id'])) {
+    $whereShtat = " AND o.ishtur_id = " . (int)$filters['shtat_turi_id'];
 }
 
 // Izoh: Ta'lim yo'nalishi bo'yicha guruhlar (raqam va talabalar soni).
@@ -81,6 +94,7 @@ $sql = "
       AND s.semestr IN ($pairStart, $pairEnd)
       $whereTeacher
       $whereKafedra
+      $whereShtat
     GROUP BY t.teacher_id, s.semestr, f.id, r.dars_tur_id
 
     UNION ALL
@@ -125,6 +139,7 @@ $sql = "
       AND s.semestr IN ($pairStart, $pairEnd)
       $whereTeacher
       $whereKafedra
+      $whereShtat
     GROUP BY t.teacher_id, s.semestr, qf.id, qf.qoshimcha_dars_id
 ";
 
@@ -267,6 +282,26 @@ function format_soat($val) {
     return rtrim(rtrim($formatted, '0'), '.');
 }
 
+// Izoh: Bildirgi uchun 0 ham ko'rinsin.
+function format_soat_report($val) {
+    $num = (float)$val;
+    if ($num == 0.0) return '0';
+    $formatted = number_format($num, 1, '.', '');
+    return rtrim(rtrim($formatted, '0'), '.');
+}
+
+// Izoh: Shtat turlarini kerakli tartibda chiqarish (Asosiy -> Ichki -> Tashqi -> Soatbay).
+function shtat_order_value($name) {
+    $n = mb_strtolower(trim((string)$name));
+    if ($n === '' || $n === '-') return 99;
+    if (strpos($n, 'asosiy') !== false) return 1;
+    if (strpos($n, 'ichki') !== false) return 2;
+    if (strpos($n, 'tashqi') !== false) return 3;
+    if (strpos($n, 'soatbay') !== false) return 4;
+    if (strpos($n, 'vakant') !== false) return 5;
+    return 9;
+}
+
 function row_total($row) {
     $sum = 0;
     foreach ($row as $k => $v) {
@@ -280,18 +315,94 @@ function row_total($row) {
     return $sum;
 }
 
+// Izoh: "Bildirgi" bo'limi uchun o'qituvchi kesimida umumiy jamlar.
+$reportKeys = [
+    'maruza', 'amaliy', 'lab', 'seminar', 'konsult',
+    'oraliq', 'yakuniy',
+    'oquv_ped', 'uzluksiz', 'dala_otm', 'dala_tash', 'ishlab_chiq',
+    'kurs_ishi', 'kurs_loyiha',
+    'bmi', 'ilmiy_tadqiqot', 'ilmiy_ped', 'ilmiy_staj',
+    'tayanch_dok', 'katta_ilmiy', 'stajyor',
+    'yadak', 'ochiq_dars', 'boshqa',
+    'jami'
+];
+$reportRows = [];
+$reportTotals = array_fill_keys($reportKeys, 0);
+foreach ($teachers as $tid => $t) {
+    $agg = array_fill_keys($reportKeys, 0);
+    foreach ($t['rows'] as $row) {
+        $agg['maruza'] += (float)$row['s1_maruza'] + (float)$row['s2_maruza'];
+        $agg['amaliy'] += (float)$row['s1_amaliy'] + (float)$row['s2_amaliy'];
+        $agg['lab'] += (float)$row['s1_lab'] + (float)$row['s2_lab'];
+        $agg['seminar'] += (float)$row['s1_seminar'] + (float)$row['s2_seminar'];
+        $agg['konsult'] += (float)$row['s1_konsult'] + (float)$row['s2_konsult'];
+        $agg['oraliq'] += (float)$row['s1_oraliq'] + (float)$row['s2_oraliq'];
+        $agg['yakuniy'] += (float)$row['s1_yakuniy'] + (float)$row['s2_yakuniy'];
+
+        $agg['oquv_ped'] += (float)$row['oquv_ped'];
+        $agg['uzluksiz'] += (float)$row['uzluksiz'];
+        $agg['dala_otm'] += (float)$row['dala_otm'];
+        $agg['dala_tash'] += (float)$row['dala_tash'];
+        $agg['ishlab_chiq'] += (float)$row['ishlab_chiq'];
+
+        $agg['kurs_ishi'] += (float)$row['kurs_ishi'];
+        $agg['kurs_loyiha'] += (float)$row['kurs_loyiha'];
+        $agg['bmi'] += (float)$row['bmi'];
+
+        $agg['ilmiy_tadqiqot'] += (float)$row['ilmiy_tadqiqot'];
+        $agg['ilmiy_ped'] += (float)$row['ilmiy_ped'];
+        $agg['ilmiy_staj'] += (float)$row['ilmiy_staj'];
+
+        $agg['tayanch_dok'] += (float)$row['tayanch_dok'];
+        $agg['katta_ilmiy'] += (float)$row['katta_ilmiy'];
+        $agg['stajyor'] += (float)$row['stajyor'];
+
+        $agg['yadak'] += (float)$row['yadak'];
+        $agg['ochiq_dars'] += (float)$row['ochiq_dars'];
+        $agg['boshqa'] += (float)$row['boshqa'];
+    }
+
+    $agg['jami'] =
+        $agg['maruza'] + $agg['amaliy'] + $agg['lab'] + $agg['seminar'] + $agg['konsult'] +
+        $agg['oraliq'] + $agg['yakuniy'] +
+        $agg['oquv_ped'] + $agg['uzluksiz'] + $agg['dala_otm'] + $agg['dala_tash'] + $agg['ishlab_chiq'] +
+        $agg['kurs_ishi'] + $agg['kurs_loyiha'] + $agg['bmi'] +
+        $agg['ilmiy_tadqiqot'] + $agg['ilmiy_ped'] + $agg['ilmiy_staj'] +
+        $agg['tayanch_dok'] + $agg['katta_ilmiy'] + $agg['stajyor'] +
+        $agg['yadak'] + $agg['ochiq_dars'] + $agg['boshqa'];
+
+    $reportRows[] = array_merge([
+        'fio' => $t['fio'] ?? '-',
+        'lavozim' => $t['lavozim'] ?? '-',
+        'ilmiy_daraja' => $t['ilmiy_daraja'] ?? '-',
+        'ilmiy_unvon' => $t['ilmiy_unvon'] ?? '-',
+        'stavka' => $t['stavka'] ?? '1',
+        'shtat_turi' => $t['shtat_turi'] ?? '-'
+    ], $agg);
+
+    foreach ($reportKeys as $k) {
+        $reportTotals[$k] += (float)$agg[$k];
+    }
+}
+
+// Izoh: Bildirgi satrlarini shtat turi bo'yicha tartiblash.
+usort($reportRows, function($a, $b) {
+    $oa = shtat_order_value($a['shtat_turi'] ?? '');
+    $ob = shtat_order_value($b['shtat_turi'] ?? '');
+    if ($oa === $ob) {
+        return strcmp($a['fio'] ?? '', $b['fio'] ?? '');
+    }
+    return $oa <=> $ob;
+});
+
 // Izoh: Jadval sarlavhasi (rasmdagi ko'rinish) uchun umumiy ustunlar soni.
 $colspan = 8 + 6 + 6 + 18;
+$reportColspan = 31;
 ?>
 
-<?php if (empty($teachers)): ?>
+<?php if ($showTaqsimot): ?>
+    <?php if (empty($teachers)): ?>
     <div class="table-container-wrapper">
-        <div class="table-header">
-            <div class="table-title">
-                <h3>O'qituvchilar soat taqsimoti (<?= $pairStart ?>-<?= $pairEnd ?> semestr)</h3>
-                <span class="badge">0 ta</span>
-            </div>
-        </div>
         <div class="table-wrapper">
             <table id="yuklamaTable">
                 <tbody>
@@ -303,6 +414,17 @@ $colspan = 8 + 6 + 6 + 18;
         </div>
     </div>
 <?php else: ?>
+    <?php
+        // Izoh: O'qituvchilarni shtat turi bo'yicha tartiblash.
+        uasort($teachers, function($a, $b) {
+            $oa = shtat_order_value($a['shtat_turi'] ?? '');
+            $ob = shtat_order_value($b['shtat_turi'] ?? '');
+            if ($oa === $ob) {
+                return strcmp($a['fio'] ?? '', $b['fio'] ?? '');
+            }
+            return $oa <=> $ob;
+        });
+    ?>
     <?php foreach ($teachers as $tIndex => $teacher): ?>
         <?php
             $sumKeys = [
@@ -339,13 +461,8 @@ $colspan = 8 + 6 + 6 + 18;
             $rowNum = 1;
         ?>
         <div class="table-container-wrapper">
-            <div class="table-header">
-                <div class="table-title">
-                    <h3>O'qituvchilar soat taqsimoti (<?= $pairStart ?>-<?= $pairEnd ?> semestr)</h3>
-                </div>
-            </div>
-            <div class="table-wrapper">
-                <table id="<?= $tableId ?>" class="oqituvchi-taqsimot-table">
+        <div class="table-wrapper">
+            <table id="<?= $tableId ?>" class="oqituvchi-taqsimot-table">
                     <colgroup>
                         <col style="width: 36px;">
                         <col style="width: 240px;">
@@ -565,4 +682,179 @@ $colspan = 8 + 6 + 6 + 18;
             </div>
         </div>
     <?php endforeach; ?>
+    <?php endif; ?>
+<?php endif; ?>
+
+<?php if ($showReport): ?>
+    <!-- Izoh: Bildirgi bo'limi (o'qituvchi kesimidagi umumiy jamlar). -->
+    <div class="table-container-wrapper">
+    <div class="table-wrapper">
+            <?php if (empty($reportRows)): ?>
+                <table class="oqituvchi-taqsimot-table">
+                    <tbody>
+                        <tr>
+                            <td colspan="<?= $reportColspan ?>" style="text-align:center;padding:16px;">Ma'lumotlar mavjud emas</td>
+                        </tr>
+                    </tbody>
+                </table>
+            <?php else: ?>
+            <table id="oqituvchiBildirgiTable" class="oqituvchi-taqsimot-table">
+                <colgroup>
+                    <col style="width: 36px;">
+                    <col style="width: 260px;">
+                    <col style="width: 120px;">
+                    <col style="width: 90px;">
+                    <col style="width: 90px;">
+                    <col style="width: 60px;">
+                    <col span="25" style="width: 45px;">
+                </colgroup>
+                <thead>
+                    <tr>
+                        <th rowspan="2">T/r</th>
+                        <th rowspan="2">Professor o‘qituvchi F.I.Sh.</th>
+                        <th rowspan="2">Lavozimi</th>
+                        <th rowspan="2">Ilmiy darajasi</th>
+                        <th rowspan="2">Ilmiy unvoni</th>
+                        <th rowspan="2">Shtat birligi</th>
+
+                        <th colspan="5">Auditoriya soatlari</th>
+                        <th rowspan="2" class="vertical">Oraliq nazorat</th>
+                        <th rowspan="2" class="vertical">Yakuniy nazorat</th>
+
+                        <th colspan="5">Malaka amaliyot</th>
+
+                        <th rowspan="2" class="vertical">Kurs ishi va himoyasi</th>
+                        <th rowspan="2" class="vertical">Kurs loyihasi va himoyasi</th>
+                        <th rowspan="2" class="vertical">BMI</th>
+
+                        <th colspan="3">Magistratura</th>
+                        <th colspan="3">Doktorantura</th>
+
+                        <th rowspan="2" class="vertical">YaDAK</th>
+                        <th rowspan="2" class="vertical">Ochiq dars</th>
+                        <th rowspan="2" class="vertical">Boshqa soatlar</th>
+                        <th rowspan="2" class="vertical">JAMI</th>
+                    </tr>
+                    <tr>
+                        <th class="vertical">Ma'ruza</th>
+                        <th class="vertical">Amaliy mashg'ulot</th>
+                        <th class="vertical">Laboratoriya</th>
+                        <th class="vertical">Seminar</th>
+                        <th class="vertical">Konsultatsiya</th>
+
+                        <th class="vertical">O'quv‑pedagogik amaliyot</th>
+                        <th class="vertical">Uzluksiz malakaviy amaliyot</th>
+                        <th class="vertical">Dala amaliyoti (OTM hududida)</th>
+                        <th class="vertical">Dala amaliyoti (OTM hududidan tashqarida)</th>
+                        <th class="vertical">Ishlab chiqarish</th>
+
+                        <th class="vertical">Ilmiy tadqiqot ishi</th>
+                        <th class="vertical">Ilmiy‑pedagogik ish</th>
+                        <th class="vertical">Ilmiy stajirovka</th>
+
+                        <th class="vertical">Tayanch doktorantura</th>
+                        <th class="vertical">Katta ilmiy tadqiqotchi</th>
+                        <th class="vertical">Stajyor‑tadqiqotchi</th>
+                    </tr>
+                    <tr>
+                        <?php for ($n = 1; $n <= $reportColspan; $n++): ?>
+                            <th style="font-weight: normal; font-size: 11px;"><?= $n ?></th>
+                        <?php endfor; ?>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php
+                        $currentGroup = null;
+                        $groupRow = 1;
+                        foreach ($reportRows as $r):
+                            $groupName = trim($r['shtat_turi'] ?? '');
+                            if ($groupName === '' || $groupName === '-') $groupName = 'Boshqa';
+                            if ($currentGroup !== $groupName):
+                                $currentGroup = $groupName;
+                                $groupRow = 1;
+                    ?>
+                        <tr>
+                            <td colspan="<?= $reportColspan ?>" style="text-align:center;font-weight:bold;">
+                                <?= mb_strtoupper($currentGroup) ?>
+                            </td>
+                        </tr>
+                    <?php endif; ?>
+                        <tr>
+                            <td><?= $groupRow++ ?></td>
+                            <td class="left"><?= htmlspecialchars($r['fio']) ?></td>
+                            <td><?= htmlspecialchars($r['lavozim']) ?></td>
+                            <td><?= htmlspecialchars($r['ilmiy_daraja']) ?></td>
+                            <td><?= htmlspecialchars($r['ilmiy_unvon']) ?></td>
+                            <td><?= htmlspecialchars($r['stavka']) ?></td>
+
+                            <td><?= format_soat_report($r['maruza']) ?></td>
+                            <td><?= format_soat_report($r['amaliy']) ?></td>
+                            <td><?= format_soat_report($r['lab']) ?></td>
+                            <td><?= format_soat_report($r['seminar']) ?></td>
+                            <td><?= format_soat_report($r['konsult']) ?></td>
+                            <td><?= format_soat_report($r['oraliq']) ?></td>
+                            <td><?= format_soat_report($r['yakuniy']) ?></td>
+
+                            <td><?= format_soat_report($r['oquv_ped']) ?></td>
+                            <td><?= format_soat_report($r['uzluksiz']) ?></td>
+                            <td><?= format_soat_report($r['dala_otm']) ?></td>
+                            <td><?= format_soat_report($r['dala_tash']) ?></td>
+                            <td><?= format_soat_report($r['ishlab_chiq']) ?></td>
+
+                            <td><?= format_soat_report($r['kurs_ishi']) ?></td>
+                            <td><?= format_soat_report($r['kurs_loyiha']) ?></td>
+                            <td><?= format_soat_report($r['bmi']) ?></td>
+
+                            <td><?= format_soat_report($r['ilmiy_tadqiqot']) ?></td>
+                            <td><?= format_soat_report($r['ilmiy_ped']) ?></td>
+                            <td><?= format_soat_report($r['ilmiy_staj']) ?></td>
+
+                            <td><?= format_soat_report($r['tayanch_dok']) ?></td>
+                            <td><?= format_soat_report($r['katta_ilmiy']) ?></td>
+                            <td><?= format_soat_report($r['stajyor']) ?></td>
+
+                            <td><?= format_soat_report($r['yadak']) ?></td>
+                            <td><?= format_soat_report($r['ochiq_dars']) ?></td>
+                            <td><?= format_soat_report($r['boshqa']) ?></td>
+                            <td><strong><?= format_soat_report($r['jami']) ?></strong></td>
+                        </tr>
+                    <?php endforeach; ?>
+                    <tr>
+                        <td></td>
+                        <td class="left"><strong>JAMI</strong></td>
+                        <td></td>
+                        <td></td>
+                        <td></td>
+                        <td></td>
+                        <td><?= format_soat_report($reportTotals['maruza']) ?></td>
+                        <td><?= format_soat_report($reportTotals['amaliy']) ?></td>
+                        <td><?= format_soat_report($reportTotals['lab']) ?></td>
+                        <td><?= format_soat_report($reportTotals['seminar']) ?></td>
+                        <td><?= format_soat_report($reportTotals['konsult']) ?></td>
+                        <td><?= format_soat_report($reportTotals['oraliq']) ?></td>
+                        <td><?= format_soat_report($reportTotals['yakuniy']) ?></td>
+                        <td><?= format_soat_report($reportTotals['oquv_ped']) ?></td>
+                        <td><?= format_soat_report($reportTotals['uzluksiz']) ?></td>
+                        <td><?= format_soat_report($reportTotals['dala_otm']) ?></td>
+                        <td><?= format_soat_report($reportTotals['dala_tash']) ?></td>
+                        <td><?= format_soat_report($reportTotals['ishlab_chiq']) ?></td>
+                        <td><?= format_soat_report($reportTotals['kurs_ishi']) ?></td>
+                        <td><?= format_soat_report($reportTotals['kurs_loyiha']) ?></td>
+                        <td><?= format_soat_report($reportTotals['bmi']) ?></td>
+                        <td><?= format_soat_report($reportTotals['ilmiy_tadqiqot']) ?></td>
+                        <td><?= format_soat_report($reportTotals['ilmiy_ped']) ?></td>
+                        <td><?= format_soat_report($reportTotals['ilmiy_staj']) ?></td>
+                        <td><?= format_soat_report($reportTotals['tayanch_dok']) ?></td>
+                        <td><?= format_soat_report($reportTotals['katta_ilmiy']) ?></td>
+                        <td><?= format_soat_report($reportTotals['stajyor']) ?></td>
+                        <td><?= format_soat_report($reportTotals['yadak']) ?></td>
+                        <td><?= format_soat_report($reportTotals['ochiq_dars']) ?></td>
+                        <td><?= format_soat_report($reportTotals['boshqa']) ?></td>
+                        <td><strong><?= format_soat_report($reportTotals['jami']) ?></strong></td>
+                    </tr>
+                </tbody>
+            </table>
+            <?php endif; ?>
+        </div>
+    </div>
 <?php endif; ?>

@@ -13,6 +13,9 @@
     $tanlov_fanlar = $_POST['tanlov_fan'];
     $insertCount = 0;
     $hasTanlovReference = false;
+    // Izoh: Bir xil so'rovda kelgan bir nechta tanlov bloklari bitta ishchi reja bazasiga yig'ilishi uchun
+    // variantlarni faqat bir marta tozalaymiz (har blokda qayta tozalanmaydi).
+    $clearedIshchiVariantIds = [];
 
     foreach ($tanlov_fanlar as $index => $tanlov_fan_value) {
         $tanlov_fan = (int) $tanlov_fan_value;
@@ -82,15 +85,33 @@
                         continue;
                     }
                     
-                    $insert = $db->insert('oquv_rejalar', [
+                    // Izoh: Bir fan + dars turi qayta saqlansa duplicate yozuv qo'shmaymiz, mavjudini yangilaymiz.
+                    $existingReja = $db->get_data_by_table('oquv_rejalar', [
                         'fan_id'      => $insert_fanid,
-                        'dars_tur_id' => $darsTurId,
-                        'dars_soat'   => $darsSoat,
-                        'izoh'        => $izoh
+                        'dars_tur_id' => $darsTurId
                     ]);
-                    
-                    if ($insert) {
+
+                    if ($existingReja) {
+                        $db->update('oquv_rejalar', [
+                            'dars_soat' => $darsSoat,
+                            'izoh'      => $izoh
+                        ], 'id = ' . (int)$existingReja['id']);
+                        // Izoh: Oldindan qolgan duplicate yozuvlar bo'lsa tozalaymiz.
+                        $db->query("DELETE FROM oquv_rejalar WHERE fan_id = " . (int)$insert_fanid . " AND dars_tur_id = " . (int)$darsTurId . " AND id <> " . (int)$existingReja['id']);
                         $insertCount++;
+                    } else {
+                        $insert = $db->insert('oquv_rejalar', [
+                            'fan_id'      => $insert_fanid,
+                            'dars_tur_id' => $darsTurId,
+                            'dars_soat'   => $darsSoat,
+                            'izoh'        => $izoh
+                        ]);
+                        
+                        if ($insert) {
+                            // Izoh: Noyoblikni saqlash uchun shu juftlik bo'yicha ortiqcha yozuvlarni o'chiramiz.
+                            $db->query("DELETE FROM oquv_rejalar WHERE fan_id = " . (int)$insert_fanid . " AND dars_tur_id = " . (int)$darsTurId . " AND id <> " . (int)$insert);
+                            $insertCount++;
+                        }
                     }
                 }
             }
@@ -150,15 +171,33 @@
                             continue;
                         }
 
-                        $insert = $db->insert('oquv_rejalar', [
+                        // Izoh: Bazaviy tanlov/chet tili fanida ham dars turi duplicate bo'lib ketmasligi uchun upsert qilamiz.
+                        $existingReja = $db->get_data_by_table('oquv_rejalar', [
                             'fan_id'      => $baseFanId,
-                            'dars_tur_id' => $darsTurId,
-                            'dars_soat'   => $darsSoat,
-                            'izoh'        => $izoh
+                            'dars_tur_id' => $darsTurId
                         ]);
 
-                        if ($insert) {
+                        if ($existingReja) {
+                            $db->update('oquv_rejalar', [
+                                'dars_soat' => $darsSoat,
+                                'izoh'      => $izoh
+                            ], 'id = ' . (int)$existingReja['id']);
+                            // Izoh: Oldindan qolgan duplicate yozuvlar bo'lsa tozalaymiz.
+                            $db->query("DELETE FROM oquv_rejalar WHERE fan_id = " . (int)$baseFanId . " AND dars_tur_id = " . (int)$darsTurId . " AND id <> " . (int)$existingReja['id']);
                             $insertCount++;
+                        } else {
+                            $insert = $db->insert('oquv_rejalar', [
+                                'fan_id'      => $baseFanId,
+                                'dars_tur_id' => $darsTurId,
+                                'dars_soat'   => $darsSoat,
+                                'izoh'        => $izoh
+                            ]);
+
+                            if ($insert) {
+                                // Izoh: Noyoblikni saqlash uchun shu juftlik bo'yicha ortiqcha yozuvlarni o'chiramiz.
+                                $db->query("DELETE FROM oquv_rejalar WHERE fan_id = " . (int)$baseFanId . " AND dars_tur_id = " . (int)$darsTurId . " AND id <> " . (int)$insert);
+                                $insertCount++;
+                            }
                         }
                     }
                 }
@@ -216,8 +255,9 @@
                 }
             }
 
-            if ($ishchiId > 0) {
+            if ($ishchiId > 0 && !isset($clearedIshchiVariantIds[$ishchiId])) {
                 $db->query("DELETE FROM ishchi_oquv_reja_variants WHERE ishchi_reja_id = $ishchiId");
+                $clearedIshchiVariantIds[$ishchiId] = true;
             }
 
             $variantSaved = false;

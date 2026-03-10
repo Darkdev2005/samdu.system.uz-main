@@ -45,9 +45,9 @@ $oqtuvchilar = $db->get_data_by_table_all('oqituvchilar');
                             <label><i class="fas fa-calendar me-2"></i>Semestr</label>
                             <select class="form-control" id="semestrFilter">
                                 <option value="">Barcha semestrlar</option>
-                                <?php for($i=1; $i<=10; $i++): ?>
+                                <?php for($i=1; $i<=10; $i+=2): ?>
                                     <option value="<?= $i ?>">
-                                        <?= $i ?>-semestr
+                                        <?= $i ?>-<?= $i+1 ?>-semestr
                                     </option>
                                 <?php endfor; ?>
                             </select>

@@ -28,7 +28,7 @@
 <html lang="uz">
 <head>
     <meta charset="UTF-8">
-    <title>O'qituvchilar soat taqsimoti</title>
+    <title>O'qituvchilar bildirgisi</title>
     <link rel="stylesheet" href="../assets/css/dashboard_style.css">
     <link rel="stylesheet" href="../assets/css/oquv_yuklama_style.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
@@ -39,7 +39,7 @@
 
         <main class="main-content">
             <header class="top-navbar">
-                <h1><i class="fas fa-users me-2"></i>O'qituvchilar soat taqsimoti</h1>
+                <h1><i class="fas fa-file-signature me-2"></i>O'qituvchilar bildirgisi</h1>
                 <div class="current-date">
                     <i class="fas fa-calendar-alt"></i>
                     <span><?php echo date('d.m.Y'); ?></span>
@@ -108,7 +108,7 @@
                     </div>
                 </div>
                 
-                <div id="taqsimotTableContainer"></div>
+                <div id="bildirgiTableContainer"></div>
             </div>
         </main>
     </div>
@@ -132,7 +132,7 @@
         });
 
         function loadTableData(kafedraId = '', semestrId = '', oqituvchiId = '', shtatTurId = '') {
-            const container = $('#taqsimotTableContainer');
+            const container = $('#bildirgiTableContainer');
             container.html(`
                 <div class="text-center py-5">
                     <div class="spinner-border text-primary" role="status">
@@ -146,7 +146,7 @@
                 url: 'get/oqituvchi_taqsimoti_table.php',
                 type: 'POST',
                 data: {
-                    mode: 'taqsimot',
+                    mode: 'report',
                     kafedra_id: kafedraId,
                     semestr: semestrId,
                     oqituvchi_id: oqituvchiId,
@@ -223,10 +223,10 @@
         }
 
         function exportToExcel() {
-            const table = document.getElementById('yuklamaTable');
+            const table = document.getElementById('oqituvchiBildirgiTable');
             if (table) {
-                const wb = XLSX.utils.table_to_book(table, {sheet: "O'qituvchi taqsimoti"});
-                XLSX.writeFile(wb, "oqituvchi_taqsimoti.xlsx");
+                const wb = XLSX.utils.table_to_book(table, {sheet: "Bildirgi"});
+                XLSX.writeFile(wb, "oqituvchi_bildirgi.xlsx");
             } else {
                 Swal.fire({
                     icon: 'warning',

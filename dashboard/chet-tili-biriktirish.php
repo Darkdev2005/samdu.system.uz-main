@@ -86,6 +86,13 @@
         $yonalishName = trim($s['yonalish_name'] ?? '');
         $kirishYili = trim($s['kirish_yili'] ?? '');
         $semestrNum = trim($s['semestr'] ?? '');
+        $daraja = mb_strtolower(trim($s['akademik_daraja_name'] ?? ''), 'UTF-8');
+        $darajaPrefix = '';
+        if (strpos($daraja, 'magistr') !== false) {
+            $darajaPrefix = 'M ';
+        } elseif (strpos($daraja, 'bakalavr') !== false) {
+            $darajaPrefix = 'B ';
+        }
 
         $labelParts = [];
         if ($yonalishName !== '') {
@@ -101,6 +108,7 @@
         if ($label === '') {
             $label = 'Semestr: ' . (int)$s['id'];
         }
+        $label = $darajaPrefix . $label;
         $semestrOptions .= '<option value="' . (int)$s['id'] . '">' . htmlspecialchars($label) . '</option>';
     }
     if ($semestrOptions === '') {
@@ -220,9 +228,16 @@
                                             foreach ($words as $w) {
                                                 $short .= mb_strtoupper(mb_substr($w, 0, 1, 'UTF-8'), 'UTF-8');
                                             }
+                                            $daraja = mb_strtolower(trim($s['akademik_daraja_name'] ?? ''), 'UTF-8');
+                                            $darajaPrefix = '';
+                                            if (strpos($daraja, 'magistr') !== false) {
+                                                $darajaPrefix = 'M ';
+                                            } elseif (strpos($daraja, 'bakalavr') !== false) {
+                                                $darajaPrefix = 'B ';
+                                            }
                                         ?>
                                         <option value="<?= $s['id'] ?>">
-                                            <?= $short . '_' . $s['kirish_yili'] . ' - ' . $s['semestr'] . '-semestr'; ?>
+                                            <?= $darajaPrefix . $short . '_' . $s['kirish_yili'] . ' - ' . $s['semestr'] . '-semestr'; ?>
                                         </option>
                                     <?php endforeach; ?>
                                 </select>
@@ -292,6 +307,14 @@
                                                     </option>
                                                 <?php endforeach; ?>
                                             </select>
+                                        </div>
+                                        <div class="form-group">
+                                            <label>Dars soati</label>
+                                            <input type="number"
+                                                class="form-control"
+                                                name="dars_soati[0][]"
+                                                min="0"
+                                                required>
                                         </div>
                                     </div>
                                     <div class="dars-soat-actions">
@@ -705,6 +728,14 @@
                                 ${chetDarsTurlariOptions}
                             </select>
                         </div>
+                        <div class="form-group">
+                            <label>Dars soati</label>
+                            <input type="number"
+                                class="form-control"
+                                name="dars_soati[${index}][]"
+                                min="0"
+                                required>
+                        </div>
                     </div>
                     <div class="dars-soat-actions">
                         <button type="button" class="btn btn-outline btn-sm addChetDarsSoat">
@@ -812,6 +843,14 @@
                             <option value="">Tanlang</option>
                             ${chetDarsTurlariOptions}
                         </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Dars soati</label>
+                        <input type="number"
+                            class="form-control"
+                            name="dars_soati[${index}][]"
+                            min="0"
+                            required>
                     </div>
                 </div>
             `);

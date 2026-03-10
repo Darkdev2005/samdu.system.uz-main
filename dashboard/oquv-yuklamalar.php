@@ -2,6 +2,7 @@
     include_once 'config.php';
     $db = new Database();
     $kafedralar = $db->get_data_by_table_all('kafedralar');
+    $yonalishlar = $db->get_data_by_table_all('yonalishlar');
 ?>
 <!DOCTYPE html>
 <html lang="uz">
@@ -39,16 +40,32 @@
                                 <?php endforeach; ?>
                             </select>
                         </div>
+
+                        <div class="form-group">
+                            <label><i class="fas fa-compass me-2"></i>Yo'nalish</label>
+                            <select class="form-control" id="yonalishFilter">
+                                <option value="">Barcha yo'nalishlar</option>
+                                <?php foreach ($yonalishlar as $y): ?>
+                                    <option value="<?= $y['id'] ?>" data-kirish-yili="<?= (int)$y['kirish_yili'] ?>">
+                                        <?= htmlspecialchars($y['name'] . ' - ' . $y['kirish_yili']) ?>
+                                    </option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
                         
                         <div class="form-group">
-                            <label><i class="fas fa-calendar me-2"></i>Semestr</label>
+                            <label><i class="fas fa-calendar me-2"></i>O'quv yili</label>
                             <select class="form-control" id="semestrFilter">
-                                <option value="">Barcha semestrlar</option>
-                                <?php for($i=1; $i<=10; $i++): ?>
-                                    <option value="<?= $i ?>">
-                                        <?= $i ?>-semestr
-                                    </option>
-                                <?php endfor; ?>
+                                <option value="">Barcha o'quv yillari</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group">
+                            <label><i class="fas fa-calendar-check me-2"></i>Semestr turi</label>
+                            <select class="form-control" id="semestrTypeFilter">
+                                <option value="">Barcha semestr turlari</option>
+                                <option value="fall">Kuzgi (1,3,5,7,9)</option>
+                                <option value="spring">Bahorgi (2,4,6,8,10)</option>
                             </select>
                         </div>
                     </div>
@@ -86,12 +103,69 @@
     <script>
         let currentZoom = 1;
         $(document).ready(function() {
-            $('#kafedraFilter, #semestrFilter').select2({
+            $('#kafedraFilter, #semestrFilter, #semestrTypeFilter, #yonalishFilter').select2({
                 placeholder: "Tanlang",
                 allowClear: true,
                 width: '100%'
             });
-            
+
+            function computeCurrentSemestr(kirishYili, type) {
+                if (!kirishYili) return null;
+                const now = new Date();
+                const month = now.getMonth() + 1;
+                const year = now.getFullYear();
+                const isFall = (month >= 9 || month === 1);
+                const academicYearStart = isFall ? year : (year - 1);
+                const parityAdd = type === 'fall' ? 1 : 2;
+                const sem = ((academicYearStart - kirishYili) * 2) + parityAdd;
+                if (sem < 1 || sem > 10) return null;
+                return sem;
+            }
+
+            function updateSemestrOptions() {
+                const yonalishOption = $('#yonalishFilter option:selected');
+                const kirishYili = parseInt(yonalishOption.data('kirish-yili'), 10) || 0;
+                const semestrType = $('#semestrTypeFilter').val();
+                const prevSelected = $('#semestrFilter').val();
+                const now = new Date();
+                const month = now.getMonth() + 1;
+                const year = now.getFullYear();
+                const isFall = (month >= 9 || month === 1);
+                const currentAcademicStart = isFall ? year : (year - 1);
+
+                let options = '<option value="">Tanlang</option>';
+                const buildYearOptions = (startYearFrom, startYearTo) => {
+                    for (let y = startYearFrom; y <= startYearTo; y++) {
+                        options += `<option value="${y}">${y}-${y + 1} o'quv yili</option>`;
+                    }
+                };
+
+                if (kirishYili) {
+                    buildYearOptions(kirishYili, currentAcademicStart);
+                } else {
+                    buildYearOptions(currentAcademicStart - 5, currentAcademicStart);
+                }
+
+                $('#semestrFilter').html(options);
+
+                const hasPrev = prevSelected && $(`#semestrFilter option[value="${prevSelected}"]`).length;
+                if (hasPrev) {
+                    $('#semestrFilter').val(prevSelected).trigger('change');
+                } else if (kirishYili) {
+                    $('#semestrFilter').val(String(currentAcademicStart)).trigger('change');
+                } else {
+                    $('#semestrFilter').val(null).trigger('change');
+                }
+
+                // Izoh: Yo'nalish tanlansa, semestr turi tanlanmagan bo'lsa joriy turini qo'yamiz.
+                if (kirishYili && !semestrType) {
+                    $('#semestrTypeFilter').val(isFall ? 'fall' : 'spring').trigger('change');
+                }
+            }
+
+            $('#yonalishFilter, #semestrTypeFilter').on('change', updateSemestrOptions);
+            updateSemestrOptions();
+
             loadTableData();
             
             $(document).on('wheel', function(e) {
@@ -106,7 +180,7 @@
             });
         });
 
-        function loadTableData(kafedraId = '', semestrId = '') {
+        function loadTableData(kafedraId = '', oquvYilStart = '', yonalishId = '', semestrType = '') {
             // Loading ko'rsatish
             const container = $('#yuklamaTableContainer');
             container.html(`
@@ -123,7 +197,9 @@
                 type: 'POST',
                 data: {
                     kafedra_id: kafedraId,
-                    semestr: semestrId
+                    oquv_yil_start: oquvYilStart,
+                    yonalish_id: yonalishId,
+                    semestr_turi: semestrType
                 },
                 success: function(response) {
                     container.html(response);
@@ -145,7 +221,9 @@
 
         function applyFilters() {
             const kafedraId = $('#kafedraFilter').val();
-            const semestrId = $('#semestrFilter').val();
+            const oquvYilStart = $('#semestrFilter').val();
+            const yonalishId = $('#yonalishFilter').val();
+            const semestrType = $('#semestrTypeFilter').val();
             
             // Loading ko'rsatish
             const filterBtn = $('.filter-actions .btn-primary');
@@ -153,7 +231,7 @@
             filterBtn.html('<i class="fas fa-spinner fa-spin me-2"></i>Filtrlash...');
             filterBtn.prop('disabled', true);
             
-            loadTableData(kafedraId, semestrId);
+            loadTableData(kafedraId, oquvYilStart, yonalishId, semestrType);
             
             setTimeout(() => {
                 filterBtn.html(originalText);
@@ -177,6 +255,8 @@
         function resetFilters() {
             $('#kafedraFilter').val(null).trigger('change');
             $('#semestrFilter').val(null).trigger('change');
+            $('#yonalishFilter').val(null).trigger('change');
+            $('#semestrTypeFilter').val(null).trigger('change');
             
             loadTableData();
             

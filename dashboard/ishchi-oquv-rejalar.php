@@ -20,6 +20,15 @@ if ($semestrRes) {
         $semestrNumbers[] = (int)$row['semestr'];
     }
 }
+$semestrPairs = [];
+if (!empty($semestrNumbers)) {
+    $maxSemestr = max($semestrNumbers);
+    for ($i = 1; $i <= $maxSemestr; $i += 2) {
+        if (in_array($i, $semestrNumbers, true) || in_array($i + 1, $semestrNumbers, true)) {
+            $semestrPairs[] = $i;
+        }
+    }
+}
 
 // Izoh: Ishchi o'quv reja jadvali uchun ma'lumotlar (kafedra bilan).
 $oquv_rejalar = [];
@@ -28,7 +37,10 @@ if (!empty($filters['yonalish_id'])) {
     $where[] = "y.id = " . (int)$filters['yonalish_id'];
 }
 if (!empty($filters['semestr'])) {
-    $where[] = "s.semestr = " . (int)$filters['semestr'];
+    $s = (int)$filters['semestr'];
+    $pairStart = ($s % 2 === 0) ? $s - 1 : $s;
+    $pairEnd = $pairStart + 1;
+    $where[] = "s.semestr IN ($pairStart, $pairEnd)";
 }
 $whereSQL = '';
 if (!empty($where)) {
@@ -53,6 +65,8 @@ $result = $db->query("
         SUM(CASE WHEN dst.id = 4 THEN o.dars_soat ELSE 0 END) AS seminar,
         SUM(CASE WHEN dst.id = 5 THEN o.dars_soat ELSE 0 END) AS mustaqilTalim,
         SUM(CASE WHEN dst.name = 'Kurs ishi' THEN o.dars_soat ELSE 0 END) AS kursIshi,
+        MAX(CASE WHEN dst.name = 'Kurs ishi' THEN 1 ELSE 0 END) AS kursIshiFlag,
+        COALESCE(qfext.kursIshiExtraFlag, 0) AS kursIshiExtraFlag,
         SUM(CASE WHEN dst.name = 'Malaka amaliyoti' THEN o.dars_soat ELSE 0 END) AS malakaAmaliyot
     FROM oquv_rejalar o
     JOIN fanlar f ON f.id = o.fan_id
@@ -60,6 +74,14 @@ $result = $db->query("
     JOIN semestrlar s ON s.id = f.semestr_id
     JOIN yonalishlar y ON y.id = s.yonalish_id
     LEFT JOIN kafedralar k ON k.id = f.kafedra_id
+    LEFT JOIN (
+        SELECT
+            semestr_id,
+            fan_name,
+            MAX(CASE WHEN qoshimcha_dars_id = 1 THEN 1 ELSE 0 END) AS kursIshiExtraFlag
+        FROM qoshimcha_fanlar
+        GROUP BY semestr_id, fan_name
+    ) qfext ON qfext.semestr_id = f.semestr_id AND qfext.fan_name = f.fan_name
     $whereSQL
     GROUP BY
         f.id,
@@ -128,6 +150,8 @@ function process_data_for_template(array $data, array $selectedVariants): array{
         $seminar   = (int)$row['seminar'];
         $mustaqil  = (int)$row['mustaqilTalim'];
         $kursIshi  = (int)$row['kursIshi'];
+        $kursIshiFlag = (int)($row['kursIshiFlag'] ?? 0);
+        $kursIshiExtraFlag = (int)($row['kursIshiExtraFlag'] ?? 0);
         $malaka    = (int)$row['malakaAmaliyot'];
 
         $audTotal = $lecture + $practical + $lab + $seminar;
@@ -192,6 +216,8 @@ function process_data_for_template(array $data, array $selectedVariants): array{
                     ],
                     'malakaAmaliyot' => $malaka,
                     'kursIshi' => $kursIshi,
+                    'kursIshiFlag' => $kursIshiFlag,
+                    'kursIshiExtraFlag' => $kursIshiExtraFlag,
                     'mustaqilTalim' => $mustaqil,
                     'department' => $row['kafedra_name']
                 ];
@@ -213,12 +239,16 @@ function process_data_for_template(array $data, array $selectedVariants): array{
                 ],
                 'malakaAmaliyot' => $malaka,
                 'kursIshi' => $kursIshi,
+                'kursIshiFlag' => $kursIshiFlag,
+                'kursIshiExtraFlag' => $kursIshiExtraFlag,
                 'mustaqilTalim' => $mustaqil,
                 'department' => $row['kafedra_name']
             ];
         }
 
-        if ($tanlovFan != 1 || !isset($semesters[$semestrNum]['subjects'][$fanCode]['totals_calculated'])) {
+        // Izoh: Tanlov/Chet tili bir kodga bir nechta variant bo'lsa, soatlar bir marta hisoblanadi.
+        // Aks holda ma'ruza/amaliy va boshqalar variantlar soniga ko'payib ketadi.
+        if (!$isVariantFan || !isset($semesters[$semestrNum]['subjects'][$fanCode]['totals_calculated'])) {
             $semesters[$semestrNum]['totals']['totalHours'] += $totalSoat;
             $semesters[$semestrNum]['totals']['credit'] += round($totalSoat / 30);
 
@@ -232,7 +262,7 @@ function process_data_for_template(array $data, array $selectedVariants): array{
             $semesters[$semestrNum]['totals']['kursIshi'] += $kursIshi;
             $semesters[$semestrNum]['totals']['malakaAmaliyot'] += $malaka;
             
-            if ($tanlovFan == 1) {
+            if ($isVariantFan) {
                 $semesters[$semestrNum]['subjects'][$fanCode]['totals_calculated'] = true;
             }
         }
@@ -305,12 +335,33 @@ function renderSubjectCells($subject, $side = 'left') {
     
     $isTanlov = isset($subject['isTanlovFan']) && $subject['isTanlovFan'] && isset($subject['variants']);
     if ($isTanlov) {
-        $fanNomiHtml = '<ol class="tanlov-fan-list">';
-        
+        // Izoh: Bir xil nomdagi variantlar bitta bandda ko'rsatiladi va soni (n) qilib chiqariladi.
+        $variantCounts = [];
+        $variantDisplayNames = [];
+        $variantOrder = [];
+
         foreach ($subject['variants'] as $variant) {
-            $fanNomiHtml .= '<li>' . htmlspecialchars($variant['name']) . '</li>';
+            $variantName = trim((string)($variant['name'] ?? ''));
+            if ($variantName === '') {
+                continue;
+            }
+            $variantKey = mb_strtolower($variantName, 'UTF-8');
+            if (!isset($variantCounts[$variantKey])) {
+                $variantCounts[$variantKey] = 0;
+                $variantDisplayNames[$variantKey] = $variantName;
+                $variantOrder[] = $variantKey;
+            }
+            $variantCounts[$variantKey]++;
         }
-        
+
+        $fanNomiHtml = '<ol class="tanlov-fan-list">';
+        foreach ($variantOrder as $variantKey) {
+            $itemLabel = htmlspecialchars($variantDisplayNames[$variantKey]);
+            if ((int)$variantCounts[$variantKey] > 1) {
+                $itemLabel .= '(' . (int)$variantCounts[$variantKey] . ')';
+            }
+            $fanNomiHtml .= '<li>' . $itemLabel . '</li>';
+        }
         $fanNomiHtml .= '</ol>';
     } else {
         $fanNomiHtml = htmlspecialchars($subject['name']);
@@ -346,7 +397,7 @@ function renderSubjectCells($subject, $side = 'left') {
         <td>' . $subject['auditoriya']['lab'] . '</td>
         <td>' . $subject['auditoriya']['seminar'] . '</td>
         <td>' . ($subject['malakaAmaliyot'] ?? 0) . '</td>
-        <td>' . ($subject['kursIshi'] ?? 0) . '</td>
+        <td>' . (((($subject['kursIshi'] ?? 0) > 0) || (($subject['kursIshiFlag'] ?? 0) > 0) || (($subject['kursIshiExtraFlag'] ?? 0) > 0)) ? 'K' : '') . '</td>
         <td>' . $subject['mustaqilTalim'] . '</td>
         <td>' . $kafedraHtml . '</td>
     ';
@@ -395,9 +446,9 @@ function renderSubjectCells($subject, $side = 'left') {
                         </select>
                         <select class="form-control" name="semestr" style="min-width:150px;" data-placeholder="Barcha semestrlar">
                             <option value="">Barcha semestrlar</option>
-                            <?php foreach ($semestrNumbers as $snum): ?>
-                                <option value="<?= $snum ?>" <?= (!empty($filters['semestr']) && (int)$filters['semestr'] === (int)$snum) ? 'selected' : '' ?>>
-                                    <?= $snum ?>-semestr
+                            <?php foreach ($semestrPairs as $pairStart): ?>
+                                <option value="<?= $pairStart ?>" <?= (!empty($filters['semestr']) && (int)$filters['semestr'] === (int)$pairStart) ? 'selected' : '' ?>>
+                                    <?= $pairStart ?>-<?= $pairStart + 1 ?>-semestr
                                 </option>
                             <?php endforeach; ?>
                         </select>

@@ -60,20 +60,28 @@
                             <label>Semestr</label>
                             <select class="form-control" name="semestr_id" id="semestrSelect"  required>
                                 <option value="">Tanlang</option>
-                                    <?php foreach ($semestrlar as $s): 
-                                        $short = '';
-                                        $words = preg_split('/\s+/u', trim($s['yonalish_name']));
-                                        foreach ($words as $w) {
-                                            $short .= mb_strtoupper(mb_substr($w, 0, 1, 'UTF-8'), 'UTF-8');
-                                        }    
-                                    ?>
+                                <?php foreach ($semestrlar as $s):
+                                    $short = '';
+                                    $words = preg_split('/\s+/u', trim($s['yonalish_name']));
+                                    foreach ($words as $w) {
+                                        $short .= mb_strtoupper(mb_substr($w, 0, 1, 'UTF-8'), 'UTF-8');
+                                    }
+                                    $daraja = mb_strtolower(trim($s['akademik_daraja_name'] ?? ''), 'UTF-8');
+                                    $darajaPrefix = '';
+                                    if (strpos($daraja, 'magistr') !== false) {
+                                        $darajaPrefix = 'M ';
+                                    } elseif (strpos($daraja, 'bakalavr') !== false) {
+                                        $darajaPrefix = 'B ';
+                                    }
+                                ?>
                                     <option value="<?= $s['id'] ?>"
                                         data-talaba="<?= $s['jami_talabalar'] ?>"
                                         data-talim-shakli="<?= htmlspecialchars($s['talim_shakli_name'] ?? '', ENT_QUOTES, 'UTF-8') ?>"
                                         data-talim-shakli-id="<?= (int)($s['talim_shakli_id'] ?? 0) ?>"
+                                        data-daraja="<?= htmlspecialchars($s['akademik_daraja_name'] ?? '', ENT_QUOTES, 'UTF-8') ?>"
                                         data-patok="<?= (int)($s['patok_soni'] ?? 0) ?>"
                                         data-guruh="<?= (int)($s['guruhlar_soni'] ?? 0) ?>">
-                                        <?= $short . '_' . $s['kirish_yili'] . ' - ' . $s['semestr'] . '-semestr('.$s['jami_talabalar'].')'; ?>
+                                        <?= $darajaPrefix . $short . '_' . $s['kirish_yili'] . ' - ' . $s['semestr'] . '-semestr('.$s['jami_talabalar'].')'; ?>
                                     </option>
                                 <?php endforeach; ?>
                             </select>
@@ -130,10 +138,18 @@
                                 </div>
                                 <div class="form-grid-3 extra-field extra-yadak" style="display:none;">
                                     <div class="form-group">
+                                        <label>YADAK turi</label>
+                                        <select class="form-control calc-input yadak-type">
+                                            <option value="basic">Umumiy (konsultatsiya/yozma)</option>
+                                            <option value="mag1">1-kurs magistr himoya (0.4)</option>
+                                            <option value="mag2">Magistr dissertatsiya (0.8)</option>
+                                        </select>
+                                    </div>
+                                    <div class="form-group yadak-teacher-wrap">
                                         <label>YADAK o'qituvchi soni</label>
                                         <input type="number" class="form-control calc-input yadak-teacher" min="0" step="1" value="1">
                                     </div>
-                                    <div class="form-group">
+                                    <div class="form-group yadak-fan-wrap">
                                         <label>YADAK fan soni</label>
                                         <input type="number" class="form-control calc-input yadak-fan-count" min="1" step="1" value="5">
                                     </div>
@@ -249,6 +265,7 @@
             return {
                 talaba: parseInt(option.data('talaba'), 10) || 0,
                 talimShakli: String(option.data('talim-shakli') || '').toLowerCase(),
+                daraja: String(option.data('daraja') || '').toLowerCase(),
                 patok: parseInt(option.data('patok'), 10) || 0,
                 guruh: parseInt(option.data('guruh'), 10) || 0
             };
@@ -285,10 +302,34 @@
 
             if (qoshimchaId === QOSHIMCHA_IDS.YADAK) {
                 card.find('.extra-yadak').show();
+                updateYadakMode(card);
             }
 
             if (qoshimchaId === QOSHIMCHA_IDS.OCHIQ_DARS) {
                 card.find('.extra-ochiq').show();
+            }
+        }
+
+        function updateYadakMode(card) {
+            const semestrMeta = getSemestrMeta();
+            const isMagistr = semestrMeta.daraja.includes('magistr');
+            const yadakSelect = card.find('.yadak-type');
+            const magOptions = yadakSelect.find('option[value="mag1"], option[value="mag2"]');
+
+            if (isMagistr) {
+                magOptions.prop('disabled', false).show();
+            } else {
+                magOptions.prop('disabled', true).hide();
+                if (yadakSelect.val() !== 'basic') {
+                    yadakSelect.val('basic');
+                }
+            }
+
+            const type = yadakSelect.val() || 'basic';
+            if (type === 'basic') {
+                card.find('.yadak-fan-wrap').show();
+            } else {
+                card.find('.yadak-fan-wrap').hide();
             }
         }
 
@@ -380,13 +421,23 @@
                     break;
                 }
                 case QOSHIMCHA_IDS.YADAK: {
+                    const yadakType = card.find('.yadak-type').val() || 'basic';
                     const teacherCount = parseInt(card.find('.yadak-teacher').val(), 10) || 0;
                     const fanCount = parseInt(card.find('.yadak-fan-count').val(), 10) || 5;
-                    const partA = Math.round(semestrMeta.talaba * teacherCount * 0.4);
-                    const partB = (semestrMeta.patok || 0) * 6 * fanCount;
-                    const partC = Math.round((semestrMeta.talaba / 5) * fanCount * 0.2);
-                    fanSoat = partA + partB + partC;
-                    hintText = `A: ${semestrMeta.talaba}×${teacherCount}×0.4=${partA}, B: ${semestrMeta.patok}×6×${fanCount}=${partB}, C: (${semestrMeta.talaba}/5)×${fanCount}×0.2=${partC}; Jami=${fanSoat}`;
+
+                    if (yadakType === 'mag1') {
+                        fanSoat = Math.round(semestrMeta.talaba * teacherCount * 0.4);
+                        hintText = `${semestrMeta.talaba} × ${teacherCount} × 0.4 = ${fanSoat}`;
+                    } else if (yadakType === 'mag2') {
+                        fanSoat = Math.round(semestrMeta.talaba * teacherCount * 0.8);
+                        hintText = `${semestrMeta.talaba} × ${teacherCount} × 0.8 = ${fanSoat}`;
+                    } else {
+                        const partA = Math.round(semestrMeta.talaba * teacherCount * 0.4);
+                        const partB = (semestrMeta.patok || 0) * 6 * fanCount;
+                        const partC = Math.round((semestrMeta.talaba / 5) * fanCount * 0.2);
+                        fanSoat = partA + partB + partC;
+                        hintText = `A: ${semestrMeta.talaba}×${teacherCount}×0.4=${partA}, B: ${semestrMeta.patok}×6×${fanCount}=${partB}, C: (${semestrMeta.talaba}/5)×${fanCount}×0.2=${partC}; Jami=${fanSoat}`;
+                    }
                     break;
                 }
                 default:
@@ -545,10 +596,18 @@
                         </div>
                         <div class="form-grid-3 extra-field extra-yadak" style="display:none;">
                             <div class="form-group">
+                                <label>YADAK turi</label>
+                                <select class="form-control calc-input yadak-type">
+                                    <option value="basic">Umumiy (konsultatsiya/yozma)</option>
+                                    <option value="mag1">1-kurs magistr himoya (0.4)</option>
+                                    <option value="mag2">Magistr dissertatsiya (0.8)</option>
+                                </select>
+                            </div>
+                            <div class="form-group yadak-teacher-wrap">
                                 <label>YADAK o'qituvchi soni</label>
                                 <input type="number" class="form-control calc-input yadak-teacher" min="0" step="1" value="1">
                             </div>
-                            <div class="form-group">
+                            <div class="form-group yadak-fan-wrap">
                                 <label>YADAK fan soni</label>
                                 <input type="number" class="form-control calc-input yadak-fan-count" min="1" step="1" value="5">
                             </div>

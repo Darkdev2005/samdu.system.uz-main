@@ -71,6 +71,40 @@
                         </table>
                     </div>
                 </div>
+
+                <!-- Yo'nalishlar tahriri tarixi -->
+                <div class="table-container mt-4">
+                    <div class="table-header">
+                        <div class="table-title">
+                            <h3>Yo'nalish tahrirlar tarixi</h3>
+                            <span class="badge" id="totalYonalishHistory">0 ta</span>
+                        </div>
+                    </div>
+
+                    <div class="table-responsive">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>ID</th>
+                                    <th>Asl yo'nalish ID</th>
+                                    <th>Yo'nalish nomi</th>
+                                    <th>Yo'nalish kodi</th>
+                                    <th>Patok</th>
+                                    <th>Katta guruh</th>
+                                    <th>Kichik guruh</th>
+                                    <th>Akademik daraja</th>
+                                    <th>Ta'lim shakli</th>
+                                    <th>Fakultet</th>
+                                    <th>Holat</th>
+                                    <th>O'zgargan sana</th>
+                                </tr>
+                            </thead>
+                            <tbody id="yonalishHistoryTable">
+                                <!-- JavaScript orqali to'ldiriladi -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
             </div>
         </main>
     </div>
@@ -86,6 +120,7 @@
             </div>
             <div class="modal-body">
                 <form id="yonalishForm">
+                    <input type="hidden" id="yonalishEditId" value="">
                     <div class="form-grid">
                         <div class="form-group">
                             <label for="yonalishNomi">
@@ -196,6 +231,7 @@
             setupModal();
             setupSearch();
             loadYonalishlar();
+            loadYonalishlarHistory();
         });
         function loadYonalishlar() {
             fetch('get/yunalishlar_table.php')
@@ -210,6 +246,20 @@
                         '<tr><td colspan="10">Xatolik yuz berdi</td></tr>';
                 });
         }
+
+        function loadYonalishlarHistory() {
+            fetch('get/yonalishlar_history_table.php')
+                .then(res => res.text())
+                .then(html => {
+                    const tbody = document.getElementById('yonalishHistoryTable');
+                    tbody.innerHTML = html || '<tr><td colspan="12">Ma\'lumot topilmadi</td></tr>';
+                    document.getElementById('totalYonalishHistory').textContent = tbody.children.length + ' ta';
+                })
+                .catch(() => {
+                    document.getElementById('yonalishHistoryTable').innerHTML =
+                        '<tr><td colspan="12">Xatolik yuz berdi</td></tr>';
+                });
+        }
         function setupModal() {
             const addBtn = document.getElementById('addYonalishBtn');
             const modal = document.getElementById('yonalishModal');
@@ -218,6 +268,10 @@
 
             if (addBtn) {
                 addBtn.addEventListener('click', () => {
+                    document.getElementById('modalTitle').textContent = "Yo'nalish qo'shish";
+                    document.getElementById('saveYonalishBtn').textContent = "Saqlash";
+                    document.getElementById('yonalishEditId').value = '';
+                    document.getElementById('yonalishForm').reset();
                     modal.classList.add('show');
                 });
             }
@@ -240,7 +294,45 @@
                     modal.classList.remove('show');
                 }
             });
+
         }
+
+        // Izoh: Jadvaldagi "Tahrirlash" tugmasi shu global funksiyani chaqiradi.
+        function openYonalishEdit(id) {
+            const modal = document.getElementById('yonalishModal');
+            if (!id) return;
+
+            fetch(`get/yonalish_one.php?id=${id}`)
+                .then(res => res.json())
+                .then(data => {
+                    if (!data.success || !data.data) {
+                        Toast.fire({ icon: 'error', title: data.message || "Yo'nalish topilmadi" });
+                        return;
+                    }
+
+                    const row = data.data;
+                    document.getElementById('yonalishEditId').value = row.id || '';
+                    document.getElementById('yonalishNomi').value = row.name || '';
+                    document.getElementById('yonalishCode').value = row.code || '';
+                    document.getElementById('yonalishMuddati').value = row.muddati || '';
+                    document.getElementById('kirishYili').value = row.kirish_yili || '';
+                    document.getElementById('yonalishPatok').value = row.patok_soni || 1;
+                    document.getElementById('yonalishKattaguruh').value = row.kattaguruh_soni || '';
+                    document.getElementById('yonalishKichikguruh').value = row.kichikguruh_soni || '';
+                    document.getElementById('akademikDarajaSelect').value = row.akademik_daraja_id || '';
+                    document.getElementById('talimShakliSelect').value = row.talim_shakli_id || '';
+                    document.getElementById('kvalifikatsiya').value = row.kvalifikatsiya || '';
+                    document.getElementById('fakultetSelect').value = row.fakultet_id || '';
+
+                    document.getElementById('modalTitle').textContent = "Yo'nalishni tahrirlash";
+                    document.getElementById('saveYonalishBtn').textContent = "Yangilash";
+                    modal.classList.add('show');
+                })
+                .catch(() => {
+                    Toast.fire({ icon: 'error', title: "Server bilan bog'lanib bo'lmadi" });
+                });
+        }
+        window.openYonalishEdit = openYonalishEdit;
 
         function setupSearch() {
             const searchInput = document.getElementById('searchYonalish');
@@ -267,7 +359,16 @@
             timerProgressBar: true
         });
 
-        document.getElementById('saveYonalishBtn').addEventListener('click', () => {
+        let isSavingYonalish = false;
+        document.getElementById('saveYonalishBtn').addEventListener('click', async () => {
+            if (isSavingYonalish) return;
+            isSavingYonalish = true;
+            const saveBtn = document.getElementById('saveYonalishBtn');
+            const oldBtnText = saveBtn.textContent;
+            saveBtn.disabled = true;
+            saveBtn.textContent = 'Saqlanmoqda...';
+
+            const editId = document.getElementById('yonalishEditId').value;
             const yonalishNomi        = document.getElementById('yonalishNomi').value.trim();
             const yonalishCode        = document.getElementById('yonalishCode').value.trim();
             const yonalishMuddati     = document.getElementById('yonalishMuddati').value;
@@ -292,8 +393,35 @@
             formData.append('patok_soni', yonalishPatok);
             formData.append('kattaguruh_soni', yonalishKattaguruh);
             formData.append('kichikguruh_soni', yonalishKichikguruh);
+            if (editId) {
+                formData.append('id', editId);
+            }
 
-            fetch('insert/add_yonalish.php', {
+            if (editId) {
+                const syncDecision = await Swal.fire({
+                    title: "Sinxronlash holatini tanlang",
+                    text: "Bu tahrir sinxronlangan holatda saqlansinmi?",
+                    icon: "question",
+                    showCancelButton: true,
+                    showDenyButton: true,
+                    confirmButtonText: "Ha, sinxronlansin",
+                    denyButtonText: "Yo'q, sinxronlanmasin",
+                    cancelButtonText: "Bekor qilish"
+                });
+
+                if (syncDecision.isDismissed) {
+                    isSavingYonalish = false;
+                    saveBtn.disabled = false;
+                    saveBtn.textContent = oldBtnText;
+                    return;
+                }
+
+                formData.append('sync_mode', syncDecision.isConfirmed ? 'sync' : 'nosync');
+            }
+
+            const endpoint = editId ? 'insert/update_yonalish.php' : 'insert/add_yonalish.php';
+
+            fetch(endpoint, {
                 method: 'POST',
                 body: formData
             })
@@ -302,15 +430,17 @@
                 if (data.success) {
                     Toast.fire({
                         icon: 'success',
-                        title: data.message || "Yo‘nalish muvaffaqiyatli saqlandi"
+                        title: data.message || "Yo'nalish muvaffaqiyatli saqlandi"
                     });
 
                     document.getElementById('yonalishModal')?.classList.remove('show');
 
                     document.getElementById('yonalishForm').reset();
-
-                    // agar jadval bo‘lsa — reload
+                    document.getElementById('yonalishEditId').value = '';
+                    document.getElementById('modalTitle').textContent = "Yo'nalish qo'shish";
+                    document.getElementById('saveYonalishBtn').textContent = "Saqlash";
                     loadYonalishlar();
+                    loadYonalishlarHistory();
 
                 } else {
                     Toast.fire({
@@ -322,8 +452,13 @@
             .catch(() => {
                 Toast.fire({
                     icon: 'error',
-                    title: "Server bilan bog‘lanib bo‘lmadi"
+                    title: "Server bilan bog'lanib bo'lmadi"
                 });
+            })
+            .finally(() => {
+                isSavingYonalish = false;
+                saveBtn.disabled = false;
+                saveBtn.textContent = oldBtnText;
             });
         });
         </script>

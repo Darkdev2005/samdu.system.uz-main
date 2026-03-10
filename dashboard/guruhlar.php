@@ -67,6 +67,33 @@ $yonalishlar = $db->get_data_by_table_all('yonalishlar');
                     </div>
 
                 </div>
+
+                <div class="table-container mt-4">
+                    <div class="table-header">
+                        <div class="table-title">
+                            <h3>Guruh tahrirlar tarixi</h3>
+                            <span class="badge" id="totalGuruhHistory">0 ta</span>
+                        </div>
+                    </div>
+
+                    <div class="table-responsive">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>ID</th>
+                                    <th>Asl guruh ID</th>
+                                    <th>Yo'nalish</th>
+                                    <th>Guruh nomeri</th>
+                                    <th>Talaba soni</th>
+                                    <th>Holat</th>
+                                    <th>O'zgargan sana</th>
+                                </tr>
+                            </thead>
+                            <tbody id="guruhHistoryTable">
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
             </div>
         </main>
     </div>
@@ -74,7 +101,7 @@ $yonalishlar = $db->get_data_by_table_all('yonalishlar');
     <div class="modal" id="guruhModal">
         <div class="modal-content">
             <div class="modal-header">
-                <h3>Guruh qo‘shish</h3>
+                <h3 id="guruhModalTitle">Guruh qo'shish</h3>
                 <button class="modal-close" id="closeGuruhModal">
                     <i class="fas fa-times"></i>
                 </button>
@@ -82,6 +109,7 @@ $yonalishlar = $db->get_data_by_table_all('yonalishlar');
 
             <div class="modal-body">
                 <form id="guruhForm">
+                    <input type="hidden" id="guruhEditId" value="">
 
                     <div class="form-group">
                         <label>
@@ -137,6 +165,7 @@ $yonalishlar = $db->get_data_by_table_all('yonalishlar');
             initGuruhModal();
             initGuruhSearch();
             loadGuruhlar();
+            loadGuruhlarHistory();
         });
 
         function loadGuruhlar() {
@@ -153,14 +182,64 @@ $yonalishlar = $db->get_data_by_table_all('yonalishlar');
                 });
         }
 
+        function loadGuruhlarHistory() {
+            fetch('get/guruhlar_history_table.php')
+                .then(res => res.text())
+                .then(html => {
+                    const tbody = document.getElementById('guruhHistoryTable');
+                    tbody.innerHTML = html || '<tr><td colspan="7">Ma\'lumot topilmadi</td></tr>';
+                    document.getElementById('totalGuruhHistory').textContent = tbody.children.length + ' ta';
+                })
+                .catch(() => {
+                    document.getElementById('guruhHistoryTable').innerHTML =
+                        '<tr><td colspan="7">Xatolik yuz berdi</td></tr>';
+                });
+        }
+
         function initGuruhModal() {
             const modal = document.getElementById('guruhModal');
 
-            document.getElementById('addGuruhBtn').onclick = () => modal.classList.add('show');
+            document.getElementById('addGuruhBtn').onclick = () => {
+                document.getElementById('guruhModalTitle').textContent = "Guruh qo'shish";
+                document.getElementById('saveGuruhBtn').textContent = "Saqlash";
+                document.getElementById('guruhEditId').value = '';
+                document.getElementById('guruhForm').reset();
+                modal.classList.add('show');
+            };
             document.getElementById('closeGuruhModal').onclick =
             document.getElementById('cancelGuruhBtn').onclick = () => modal.classList.remove('show');
 
             window.onclick = e => { if (e.target === modal) modal.classList.remove('show'); };
+
+            // Izoh: Guruhni tahrirlash uchun jadvaldan yozuvni modalga yuklaymiz.
+            document.addEventListener('click', (e) => {
+                const editBtn = e.target.closest('.editGuruhBtn');
+                if (!editBtn) return;
+                const id = editBtn.dataset.id || '';
+                if (!id) return;
+
+                fetch(`get/guruh_one.php?id=${id}`)
+                    .then(res => res.json())
+                    .then(data => {
+                        if (!data.success || !data.data) {
+                            Toast.fire({ icon: 'error', title: data.message || "Guruh topilmadi" });
+                            return;
+                        }
+
+                        const row = data.data;
+                        document.getElementById('guruhEditId').value = row.id || '';
+                        document.querySelector('select[name="yonalish_id"]').value = row.yonalish_id || '';
+                        document.querySelector('input[name="guruh_nomi"]').value = row.guruh_nomer || '';
+                        document.querySelector('input[name="talaba_soni"]').value = row.soni || '';
+
+                        document.getElementById('guruhModalTitle').textContent = "Guruhni tahrirlash";
+                        document.getElementById('saveGuruhBtn').textContent = "Yangilash";
+                        modal.classList.add('show');
+                    })
+                    .catch(() => {
+                        Toast.fire({ icon: 'error', title: "Server bilan bog'lanib bo'lmadi" });
+                    });
+            });
         }
 
         function initGuruhSearch() {
@@ -175,16 +254,57 @@ $yonalishlar = $db->get_data_by_table_all('yonalishlar');
             });
         }
 
-        document.getElementById('saveGuruhBtn').addEventListener('click', () => {
+        let isSavingGuruh = false;
+        document.getElementById('saveGuruhBtn').addEventListener('click', async () => {
+            if (isSavingGuruh) return;
+            isSavingGuruh = true;
+
+            const saveBtn = document.getElementById('saveGuruhBtn');
+            const oldBtnText = saveBtn.textContent;
+            saveBtn.disabled = true;
+            saveBtn.textContent = 'Saqlanmoqda...';
+
             const form = document.getElementById('guruhForm');
             const formData = new FormData(form);
+            const editId = document.getElementById('guruhEditId').value;
 
             if (!form.checkValidity()) {
-                Toast.fire({ icon: 'error', title: 'Barcha maydonlarni to‘ldiring!' });
+                Toast.fire({ icon: 'error', title: "Barcha maydonlarni to'ldiring!" });
+                isSavingGuruh = false;
+                saveBtn.disabled = false;
+                saveBtn.textContent = oldBtnText;
                 return;
             }
 
-            fetch('insert/add_guruh.php', {
+            if (editId) {
+                formData.append('id', editId);
+            }
+
+            if (editId) {
+                const syncDecision = await Swal.fire({
+                    title: "Sinxronlash holatini tanlang",
+                    text: "Bu tahrir sinxronlangan holatda saqlansinmi?",
+                    icon: "question",
+                    showCancelButton: true,
+                    showDenyButton: true,
+                    confirmButtonText: "Ha, sinxronlansin",
+                    denyButtonText: "Yo'q, sinxronlanmasin",
+                    cancelButtonText: "Bekor qilish"
+                });
+
+                if (syncDecision.isDismissed) {
+                    isSavingGuruh = false;
+                    saveBtn.disabled = false;
+                    saveBtn.textContent = oldBtnText;
+                    return;
+                }
+
+                formData.append('sync_mode', syncDecision.isConfirmed ? 'sync' : 'nosync');
+            }
+
+            const endpoint = editId ? 'insert/update_guruh.php' : 'insert/add_guruh.php';
+
+            fetch(endpoint, {
                 method: 'POST',
                 body: formData
             })
@@ -193,16 +313,26 @@ $yonalishlar = $db->get_data_by_table_all('yonalishlar');
                 if (data.success) {
                     Toast.fire({ icon: 'success', title: data.message });
                     form.reset();
+                    document.getElementById('guruhEditId').value = '';
+                    document.getElementById('guruhModalTitle').textContent = "Guruh qo'shish";
+                    document.getElementById('saveGuruhBtn').textContent = "Saqlash";
                     document.getElementById('guruhModal').classList.remove('show');
                     loadGuruhlar();
+                    loadGuruhlarHistory();
                 } else {
                     Toast.fire({ icon: 'error', title: data.message });
                 }
             })
             .catch(() => {
-                Toast.fire({ icon: 'error', title: 'Server bilan bog‘lanib bo‘lmadi' });
+                Toast.fire({ icon: 'error', title: "Server bilan bog'lanib bo'lmadi" });
+            })
+            .finally(() => {
+                isSavingGuruh = false;
+                saveBtn.disabled = false;
+                saveBtn.textContent = oldBtnText;
             });
         });
+
     </script>
 
 </body>

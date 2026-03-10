@@ -38,10 +38,17 @@
                                         $words = preg_split('/\s+/u', trim($s['yonalish_name']));
                                         foreach ($words as $w) {
                                             $short .= mb_strtoupper(mb_substr($w, 0, 1, 'UTF-8'), 'UTF-8');
-                                        }    
+                                        }
+                                        $daraja = mb_strtolower(trim($s['akademik_daraja_name'] ?? ''), 'UTF-8');
+                                        $darajaPrefix = '';
+                                        if (strpos($daraja, 'magistr') !== false) {
+                                            $darajaPrefix = 'M ';
+                                        } elseif (strpos($daraja, 'bakalavr') !== false) {
+                                            $darajaPrefix = 'B ';
+                                        }
                                     ?>
                                     <option value="<?= $s['id'] ?>">
-                                        <?= $short . '_' . $s['kirish_yili'] . ' - ' . $s['semestr'] . '-semestr'; ?>
+                                        <?= $darajaPrefix . $short . '_' . $s['kirish_yili'] . ' - ' . $s['semestr'] . '-semestr'; ?>
                                     </option>
                                 <?php endforeach; ?>
                             </select>
@@ -288,7 +295,7 @@
         }
 
 
-        // Izoh: Tanlov fan / Chet tili uchun kod + nom va faqat dars turi qo'shiladi (soat kiritilmaydi).
+        // Izoh: Tanlov fan / Chet tili uchun kod + nom va dars turi + dars soati qo'shiladi.
         function switchToElective(card, index, typeValue = 1) {
             const isLanguage = typeValue === 3;
             const isTanlov = typeValue === 1;
@@ -312,7 +319,7 @@
                     </div>
                 </div>
 
-                <div class="darsSoatWrapper" data-only-turi="1">
+                <div class="darsSoatWrapper">
                     <div class="form-grid-2 dars-soat-row">
                         <div class="form-group">
                             <label>Dars turi</label>
@@ -324,6 +331,15 @@
                                     </option>
                                 <?php endforeach; ?>
                             </select>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Dars soati</label>
+                            <input type="number"
+                                class="form-control"
+                                name="dars_soati[${index}][]"
+                                min="0"
+                                required>
                         </div>
                     </div>
                     <div class="dars-soat-actions">
@@ -375,23 +391,12 @@
             const card = $(this).closest('.reja-card');
             const wrapper = $(this).closest('.darsSoatWrapper');
             const index = card.data('index');
-            const onlyTuri = String(wrapper.data('only-turi') || '') === '1';
             
             const darsTurlariOptions = `<?php foreach ($dars_soat_turlari as $d): ?>
                 <option value="<?= $d['id'] ?>"><?= htmlspecialchars($d['name']) ?></option>
             <?php endforeach; ?>`;
             
-            const newRow = onlyTuri ? $(`
-                <div class="form-grid-2 dars-soat-row">
-                    <div class="form-group">
-                        <label>Dars turi</label>
-                        <select class="form-control" name="dars_turi[${index}][]" required>
-                            <option value="">Tanlang</option>
-                            ${darsTurlariOptions}
-                        </select>
-                    </div>
-                </div>
-            `) : $(`
+            const newRow = $(`
                 <div class="form-grid-2 dars-soat-row">
                     <div class="form-group">
                         <label>Dars turi</label>

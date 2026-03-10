@@ -11,10 +11,10 @@
         <td><?php echo htmlspecialchars($guruh['soni']); ?></td>
         <td><?php echo htmlspecialchars($guruh['create_at']); ?></td>
         <td>
-            <button class="btn btn-sm btn-warning editFakultetBtn" data-id="<?php echo $guruh['id']; ?>">
+            <button class="btn btn-sm btn-warning editGuruhBtn" data-id="<?php echo $guruh['id']; ?>">
                 <i class="fas fa-edit"></i> Tahrirlash
             </button>
-            <button class="btn btn-sm btn-danger deleteFakultetBtn" data-id="<?php echo $guruh['id']; ?>">
+            <button class="btn btn-sm btn-danger deleteGuruhBtn" data-id="<?php echo $guruh['id']; ?>">
                 <i class="fas fa-trash-alt"></i> O'chirish
             </button>
         </td>

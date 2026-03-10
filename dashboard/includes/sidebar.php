@@ -205,6 +205,12 @@
                                 <span>O'qituvchilar soat taqsimoti</span>
                             </a>
                         </li>
+                        <li>
+                            <a href="oqituvchi-bildirgi.php">
+                                <i class="fas fa-file-signature"></i>
+                                <span>O'qituvchilar bildirgisi</span>
+                            </a>
+                        </li>
                     </ul>
                 </details>
             </li>

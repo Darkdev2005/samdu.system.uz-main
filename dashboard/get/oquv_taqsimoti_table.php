@@ -12,6 +12,11 @@ if (isset($_POST['semestr']) && !empty($_POST['semestr'])) {
 
 $oquv_taqsimotlar = $db->get_oquv_taqsimotlar($filters);
 $qoshimcha_oquv_taqsimotlar = $db->get_qoshimcha_oquv_taqsimotlar($filters);
+$pendingEvents = $db->get_data_by_table_all('taqsimot_resync_events', "WHERE status = 'pending'");
+$pendingYonalishMap = [];
+foreach ($pendingEvents as $ev) {
+    $pendingYonalishMap[(int)$ev['yonalish_id']] = true;
+}
 ?>
 <style>
     .full-soat {
@@ -28,6 +33,21 @@ $qoshimcha_oquv_taqsimotlar = $db->get_qoshimcha_oquv_taqsimotlar($filters);
     font-size: 11px;
     font-weight: bold;
     margin-top: 4px;
+}
+
+.needs-resync > td {
+    background: #ffe8e8 !important;
+}
+
+.resync-badge {
+    display: inline-block;
+    margin-top: 4px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 10px;
+    font-weight: 700;
+    color: #fff;
+    background: #dc3545;
 }
 
 </style>
@@ -133,6 +153,7 @@ $qoshimcha_oquv_taqsimotlar = $db->get_qoshimcha_oquv_taqsimotlar($filters);
                 }
                 if (!empty($oquv_taqsimotlar) || !empty($qoshimcha_oquv_taqsimotlar)):
                     foreach ($oquv_taqsimotlar as $row): 
+                        $needsResync = !empty($pendingYonalishMap[(int)($row['yonalish_id'] ?? 0)]);
                         $taqsimlangan_maruza   = getTaqsimotSoat($db, $row['maruza_reja_id'] ?? 0);
                         
                         $taqsimlangan_amaliy   = getTaqsimotSoat($db, $row['amaliy_reja_id'] ?? 0);
@@ -141,10 +162,15 @@ $qoshimcha_oquv_taqsimotlar = $db->get_qoshimcha_oquv_taqsimotlar($filters);
                         $maruza_jami = $taqsimlangan_maruza['jami_soat'];
 
                 ?>
-                <tr>
+                <tr class="<?= $needsResync ? 'needs-resync' : '' ?>">
                     <td><?= $counter++ ?></td>
                     <td class="left fan-nomi"><?= htmlspecialchars($row['fan_nomi']) ?></td>
-                    <td class="left"><?= htmlspecialchars($row['yonalish_code'] . ' – ' . $row['talim_yonalishi']) ?></td>
+                    <td class="left">
+                        <?= htmlspecialchars($row['yonalish_code'] . ' - ' . $row['talim_yonalishi']) ?>
+                        <?php if ($needsResync): ?>
+                            <div class="resync-badge">Qayta taqsimot kerak</div>
+                        <?php endif; ?>
+                    </td>
                     <td><?= htmlspecialchars($row['guruh_raqami']) ?></td>
                     <td><?= $row['oquv_shakli'] ?></td>
                     <td><?= $row['kurs'] ?></td>
@@ -226,11 +252,17 @@ $qoshimcha_oquv_taqsimotlar = $db->get_qoshimcha_oquv_taqsimotlar($filters);
                 <?php 
                     endforeach;
                     foreach ($qoshimcha_oquv_taqsimotlar as $row):
+                        $needsResync = !empty($pendingYonalishMap[(int)($row['yonalish_id'] ?? 0)]);
                 ?>
-                <tr>
+                <tr class="<?= $needsResync ? 'needs-resync' : '' ?>">
                     <td><?= $counter++ ?></td>
                     <td class="left fan-nomi"><?= htmlspecialchars($row['fan_nomi']) ?></td>
-                    <td class="left"><?= htmlspecialchars($row['yonalish_code'] . ' – ' . $row['talim_yonalishi']) ?></td>
+                    <td class="left">
+                        <?= htmlspecialchars($row['yonalish_code'] . ' - ' . $row['talim_yonalishi']) ?>
+                        <?php if ($needsResync): ?>
+                            <div class="resync-badge">Qayta taqsimot kerak</div>
+                        <?php endif; ?>
+                    </td>
                     <td><?= htmlspecialchars($row['guruh_raqami']) ?></td>
                     <td><?= $row['oquv_shakli'] ?></td>
                     <td><?= $row['kurs'] ?></td>
@@ -261,10 +293,10 @@ $qoshimcha_oquv_taqsimotlar = $db->get_qoshimcha_oquv_taqsimotlar($filters);
                         <?= $row['yakuniy_nazorat'] ?: '' ?>
                     </td>
                      <td class="soat-cell" data-type='Q' data-yuklama-id="<?= $row['qoshimcha_reja_id'] ?>" data-soat-turi="kurs_ishi" data-max-soat="<?= $row['kurs_ishi'] ?>">
-                        <?= ($row['kurs_ishi'] ?? 0) > 0 ? 'K' : '' ?>
+                        <?= $row['kurs_ishi'] > 0 ? $row['kurs_ishi'] : '' ?>
                     </td>
                     <td class="soat-cell" data-type='Q' data-yuklama-id="<?= $row['qoshimcha_reja_id'] ?>" data-soat-turi="kurs_loyiha" data-max-soat="<?= $row['kurs_loyiha'] ?>">
-                        <?= ($row['kurs_loyiha'] ?? 0) > 0 ? 'K' : '' ?>
+                        <?= $row['kurs_loyiha'] > 0 ? $row['kurs_loyiha'] : '' ?>
                     </td>
                     <!-- Malakaviy amaliyot -->
                     <td class="soat-cell" data-type='Q' data-yuklama-id="<?= $row['qoshimcha_reja_id'] ?>" data-soat-turi="oquv_ped_amaliyot" data-max-soat="<?= $row['oquv_ped_amaliyot'] ?>">

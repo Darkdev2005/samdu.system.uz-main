@@ -62,6 +62,13 @@
         $yonalishName = trim($s['yonalish_name'] ?? '');
         $kirishYili = trim($s['kirish_yili'] ?? '');
         $semestrNum = trim($s['semestr'] ?? '');
+        $daraja = mb_strtolower(trim($s['akademik_daraja_name'] ?? ''), 'UTF-8');
+        $darajaPrefix = '';
+        if (strpos($daraja, 'magistr') !== false) {
+            $darajaPrefix = 'M ';
+        } elseif (strpos($daraja, 'bakalavr') !== false) {
+            $darajaPrefix = 'B ';
+        }
 
         // Izoh: Yo'nalish nomini to'liq ko'rsatamiz.
         $labelParts = [];
@@ -78,6 +85,7 @@
         if ($label === '') {
             $label = 'Semestr: ' . (int)$s['id'];
         }
+        $label = $darajaPrefix . $label;
         $semestrOptions .= '<option value="' . (int)$s['id'] . '">' . htmlspecialchars($label) . '</option>';
     }
     if ($semestrOptions === '') {

@@ -9,6 +9,15 @@ if (isset($_POST['kafedra_id']) && !empty($_POST['kafedra_id'])) {
 if (isset($_POST['semestr']) && !empty($_POST['semestr'])) {
     $filters['semestr'] = (int)$_POST['semestr'];
 }
+if (isset($_POST['oquv_yil_start']) && !empty($_POST['oquv_yil_start'])) {
+    $filters['oquv_yil_start'] = (int)$_POST['oquv_yil_start'];
+}
+if (isset($_POST['semestr_turi']) && !empty($_POST['semestr_turi'])) {
+    $filters['semestr_turi'] = trim($_POST['semestr_turi']);
+}
+if (isset($_POST['yonalish_id']) && !empty($_POST['yonalish_id'])) {
+    $filters['yonalish_id'] = (int)$_POST['yonalish_id'];
+}
 
 $oquv_yuklamalar = $db->get_oquv_yuklamalar($filters);
 $qoshimcha_yuklamalar = $db->get_qoshimcha_oquv_yuklamalar($filters);
@@ -101,8 +110,52 @@ $qoshimcha_yuklamalar = $db->get_qoshimcha_oquv_yuklamalar($filters);
             <tbody>
                 <?php 
                 $counter = 1;
+                $totals = [
+                    'reja_maruza' => 0, 'reja_amaliy' => 0, 'reja_lab' => 0, 'reja_seminar' => 0,
+                    'oraliq' => 0, 'yakuniy' => 0,
+                    'kurs_ishi' => 0, 'kurs_loyiha' => 0,
+                    'oquv_ped' => 0, 'uzluksiz' => 0, 'dala_otm' => 0, 'dala_tash' => 0, 'ishlab' => 0,
+                    'bmi' => 0,
+                    'mag_ilmiy' => 0, 'mag_ped' => 0, 'mag_staj' => 0,
+                    'dok_tayanch' => 0, 'dok_katta' => 0, 'dok_staj' => 0,
+                    'ochiq' => 0, 'yadak' => 0, 'boshqa' => 0,
+                    'jami' => 0
+                ];
                 if (!empty($oquv_yuklamalar)):
                     foreach ($oquv_yuklamalar as $row): 
+                        $talaba = (int)($row['talabalar_soni'] ?? 0);
+                        $auditoriyaSoat = (float)($row['maruza_soat'] ?? 0)
+                            + (float)($row['amaliy_soat'] ?? 0)
+                            + (float)($row['laboratoriya_soat'] ?? 0)
+                            + (float)($row['seminar_soat'] ?? 0);
+                        $shakl = mb_strtolower(trim($row['oquv_shakli'] ?? ''), 'UTF-8');
+                        $isExternal = (strpos($shakl, 'sirtqi') !== false) || (strpos($shakl, 'masof') !== false) || (strpos($shakl, 'kechki') !== false);
+
+                        $oraliq = 0;
+                        if (!$isExternal && $talaba > 0) {
+                            if ($auditoriyaSoat >= 60) {
+                                $oraliq = round($talaba * 0.4);
+                            } elseif ($auditoriyaSoat >= 30) {
+                                $oraliq = round($talaba * 0.2);
+                            }
+                        }
+                        $yakuniy = (!$isExternal && $talaba > 0) ? round($talaba * 0.3) : 0;
+                        $kursIshi = $talaba > 0 ? round($talaba * 2.4) : 0;
+                        $kursLoyiha = $talaba > 0 ? round($talaba * 3.6) : 0;
+                        $uzluksiz = $talaba > 0 ? round($talaba * ($isExternal ? 0.4 : 2)) : 0;
+
+                        $jamiAll = (float)($row['jami_soat'] ?? 0) + $oraliq + $yakuniy + $kursIshi + $kursLoyiha + $uzluksiz;
+
+                        $totals['reja_maruza'] += (float)($row['maruza_soat'] ?? 0);
+                        $totals['reja_amaliy'] += (float)($row['amaliy_soat'] ?? 0);
+                        $totals['reja_lab'] += (float)($row['laboratoriya_soat'] ?? 0);
+                        $totals['reja_seminar'] += (float)($row['seminar_soat'] ?? 0);
+                        $totals['oraliq'] += $oraliq;
+                        $totals['yakuniy'] += $yakuniy;
+                        $totals['kurs_ishi'] += $kursIshi;
+                        $totals['kurs_loyiha'] += $kursLoyiha;
+                        $totals['uzluksiz'] += $uzluksiz;
+                        $totals['jami'] += $jamiAll;
                 ?>
                 <tr>
                     <td><?= $counter++ ?></td>
@@ -122,17 +175,19 @@ $qoshimcha_yuklamalar = $db->get_qoshimcha_oquv_yuklamalar($filters);
                     <td><?= $row['laboratoriya_soat'] ?></td>
                     <td><?= $row['seminar_soat'] ?></td>
                     <!-- Amalda bajarilgan -->
-                    <td><?= $row['amalda_maruz'] ?></td>
-                    <td><?= $row['amalda_amaliy'] ?></td>
-                    <td><?= $row['amalda_lab'] ?></td>
-                    <td><?= $row['amalda_seminar'] ?></td>
+                    <td></td>
+                    <td></td>
+                    <td></td>
+                    <td></td>
                     <!-- Reyting nazorati -->
-                    <td></td>
-                    <td></td>
+                    <td><?= $oraliq ?: '' ?></td>
+                    <td><?= $yakuniy ?: '' ?></td>
                     <!-- Kurs ishlari -->
-                    <td></td>
-                    <td></td>
+                    <td><?= $kursIshi ?: '' ?></td>
+                    <td><?= $kursLoyiha ?: '' ?></td>
                     <!-- Malakaviy amaliyot -->
+                    <td></td>
+                    <td><?= $uzluksiz ?: '' ?></td>
                     <td></td>
                     <td></td>
                     <td></td>
@@ -150,15 +205,33 @@ $qoshimcha_yuklamalar = $db->get_qoshimcha_oquv_yuklamalar($filters);
                     <td></td>
                     <td></td>
                     <td></td>
-                    <td></td>
-                    <td></td>
                     <!-- JAMI soat -->
-                    <td><?= $row['jami_soat'] ?></td>
+                    <td><?= $jamiAll ?></td>
                     <td class="left"><?= htmlspecialchars($row['kafedra_nomi'] ?? '') ?></td>
                 </tr>
                 <?php 
                     endforeach;
                     foreach ($qoshimcha_yuklamalar as $row):
+                        $totals['oraliq'] += (float)($row['oraliq_nazorat'] ?? 0);
+                        $totals['yakuniy'] += (float)($row['yakuniy_nazorat'] ?? 0);
+                        $totals['kurs_ishi'] += (float)($row['kurs_ishi'] ?? 0);
+                        $totals['kurs_loyiha'] += (float)($row['kurs_loyiha'] ?? 0);
+                        $totals['oquv_ped'] += (float)($row['oquv_ped_amaliyot'] ?? 0);
+                        $totals['uzluksiz'] += (float)($row['uzluksiz_malakaviy'] ?? 0);
+                        $totals['dala_otm'] += (float)($row['dala_amaliyoti_otm'] ?? 0);
+                        $totals['dala_tash'] += (float)($row['dala_amaliyoti_tashqarida'] ?? 0);
+                        $totals['ishlab'] += (float)($row['ishlab_chiqarish'] ?? 0);
+                        $totals['bmi'] += (float)($row['bmi_rahbarligi'] ?? 0);
+                        $totals['mag_ilmiy'] += (float)($row['ilmiy_tadqiqot_ishi'] ?? 0);
+                        $totals['mag_ped'] += (float)($row['ilmiy_pedagogik_ishi'] ?? 0);
+                        $totals['mag_staj'] += (float)($row['ilmiy_stajirovka'] ?? 0);
+                        $totals['dok_tayanch'] += (float)($row['tayanch_doktorantura'] ?? 0);
+                        $totals['dok_katta'] += (float)($row['katta_ilmiy_tadqiqotchi'] ?? 0);
+                        $totals['dok_staj'] += (float)($row['stajyor_tadqiqotchi'] ?? 0);
+                        $totals['ochiq'] += (float)($row['ochiq_dars'] ?? 0);
+                        $totals['yadak'] += (float)($row['yadak'] ?? 0);
+                        $totals['boshqa'] += (float)($row['boshqa_soatlar'] ?? 0);
+                        $totals['jami'] += (float)($row['jami_soat'] ?? 0);
                 ?>
                 <tr>
                     <td><?= $counter++ ?></td>
@@ -186,8 +259,8 @@ $qoshimcha_yuklamalar = $db->get_qoshimcha_oquv_yuklamalar($filters);
                     <td><?= $row['oraliq_nazorat'] ?></td>
                     <td><?= $row['yakuniy_nazorat'] ?></td>
                     <!-- Kurs ishlari -->
-                    <td><?= ($row['kurs_ishi'] ?? 0) > 0 ? 'K' : '' ?></td>
-                    <td><?= ($row['kurs_loyiha'] ?? 0) > 0 ? 'K' : '' ?></td>
+                    <td><?= ($row['kurs_ishi'] ?? 0) ?: '' ?></td>
+                    <td><?= ($row['kurs_loyiha'] ?? 0) ?: '' ?></td>
                     <!-- Malakaviy amaliyot -->
                     <td><?= $row['oquv_ped_amaliyot'] ?></td>
                     <td><?= $row['uzluksiz_malakaviy'] ?></td>
@@ -215,9 +288,52 @@ $qoshimcha_yuklamalar = $db->get_qoshimcha_oquv_yuklamalar($filters);
                 </tr>
                 <?php 
                     endforeach;
-                else: ?>
+                ?>
+                <tr class="total-row">
+                    <td colspan="11" class="left"><strong>Jami</strong></td>
+                    <!-- O'quv reja bo'yicha -->
+                    <td><strong><?= $totals['reja_maruza'] ?></strong></td>
+                    <td><strong><?= $totals['reja_amaliy'] ?></strong></td>
+                    <td><strong><?= $totals['reja_lab'] ?></strong></td>
+                    <td><strong><?= $totals['reja_seminar'] ?></strong></td>
+                    <!-- Amalda bajarilgan -->
+                    <td></td>
+                    <td></td>
+                    <td></td>
+                    <td></td>
+                    <!-- Reyting nazorati -->
+                    <td><strong><?= $totals['oraliq'] ?></strong></td>
+                    <td><strong><?= $totals['yakuniy'] ?></strong></td>
+                    <!-- Kurs ishlari -->
+                    <td><strong><?= $totals['kurs_ishi'] ?></strong></td>
+                    <td><strong><?= $totals['kurs_loyiha'] ?></strong></td>
+                    <!-- Malakaviy amaliyot -->
+                    <td><strong><?= $totals['oquv_ped'] ?></strong></td>
+                    <td><strong><?= $totals['uzluksiz'] ?></strong></td>
+                    <td><strong><?= $totals['dala_tash'] ?></strong></td>
+                    <td><strong><?= $totals['dala_otm'] ?></strong></td>
+                    <td><strong><?= $totals['ishlab'] ?></strong></td>
+                    <!-- BMI rahbarligi -->
+                    <td><strong><?= $totals['bmi'] ?></strong></td>
+                    <!-- Magistratura -->
+                    <td><strong><?= $totals['mag_ilmiy'] ?></strong></td>
+                    <td><strong><?= $totals['mag_ped'] ?></strong></td>
+                    <td><strong><?= $totals['mag_staj'] ?></strong></td>
+                    <!-- Doktorantura -->
+                    <td><strong><?= $totals['dok_tayanch'] ?></strong></td>
+                    <td><strong><?= $totals['dok_katta'] ?></strong></td>
+                    <td><strong><?= $totals['dok_staj'] ?></strong></td>
+                    <!-- Qo'shimcha soatlar -->
+                    <td><strong><?= $totals['ochiq'] ?></strong></td>
+                    <td><strong><?= $totals['yadak'] ?></strong></td>
+                    <td><strong><?= $totals['boshqa'] ?></strong></td>
+                    <!-- JAMI soat -->
+                    <td><strong><?= $totals['jami'] ?></strong></td>
+                    <td></td>
+                </tr>
+                <?php else: ?>
                 <tr>
-                    <td colspan="38" style="text-align: center; padding: 20px;">
+                    <td colspan="40" style="text-align: center; padding: 20px;">
                         <i class="fas fa-info-circle"></i> Ma'lumotlar mavjud emas
                     </td>
                 </tr>

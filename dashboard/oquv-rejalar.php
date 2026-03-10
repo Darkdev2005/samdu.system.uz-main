@@ -20,16 +20,69 @@ if ($semestrRes) {
         $semestrNumbers[] = (int)$row['semestr'];
     }
 }
+$semestrPairs = [];
+if (!empty($semestrNumbers)) {
+    $maxSemestr = max($semestrNumbers);
+    for ($i = 1; $i <= $maxSemestr; $i += 2) {
+        if (in_array($i, $semestrNumbers, true) || in_array($i + 1, $semestrNumbers, true)) {
+            $semestrPairs[] = $i;
+        }
+    }
+}
 
 $oquv_rejalar = $db->get_oquv_rejalar($filters);
 
-function process_data_for_template(array $data): array{
+// Izoh: O'quv rejada tanlov fan nechta variantga ega ekanini ishchi reja variantlaridan olamiz.
+// Shu bilan bazaviy o'quv rejada ham "Tanlov fan" soni variantlar soniga mos chiqadi.
+$where = [];
+if (!empty($filters['yonalish_id'])) {
+    $where[] = "y.id = " . (int)$filters['yonalish_id'];
+}
+if (!empty($filters['semestr'])) {
+    $s = (int)$filters['semestr'];
+    $pairStart = ($s % 2 === 0) ? $s - 1 : $s;
+    $pairEnd = $pairStart + 1;
+    $where[] = "s.semestr IN ($pairStart, $pairEnd)";
+}
+$whereSQL = '';
+if (!empty($where)) {
+    $whereSQL = 'WHERE ' . implode(' AND ', $where);
+}
+
+$selectedVariants = [];
+$variantResult = $db->query("
+    SELECT
+        fb.fan_code,
+        fb.semestr_id,
+        fv.fan_name
+    FROM ishchi_oquv_reja ior
+    JOIN fanlar fb ON fb.id = ior.base_fan_id
+    JOIN ishchi_oquv_reja_variants iv ON iv.ishchi_reja_id = ior.id
+    JOIN fanlar fv ON fv.id = iv.fan_id
+    JOIN semestrlar s ON s.id = fb.semestr_id
+    JOIN yonalishlar y ON y.id = s.yonalish_id
+    $whereSQL
+    ORDER BY fv.fan_name
+");
+if ($variantResult) {
+    while ($row = mysqli_fetch_assoc($variantResult)) {
+        $key = $row['fan_code'] . '|' . $row['semestr_id'];
+        $selectedVariants[$key][] = [
+            'name' => $row['fan_name']
+        ];
+    }
+}
+
+function process_data_for_template(array $data, array $selectedVariants = []): array{
     $semesters = [];
 
     foreach ($data as $row) {
         $semestrNum = (int)$row['semestr'];
         $fanCode    = $row['fan_code'];
         $tanlovFan  = (int)$row['tanlov_fan'];
+        $semestrId  = (int)($row['semestr_id'] ?? 0);
+        $variantKey = $fanCode . '|' . $semestrId;
+        $hasSelectedVariants = isset($selectedVariants[$variantKey]) && count($selectedVariants[$variantKey]) > 0;
 
         $lecture   = (int)$row['lecture'];
         $practical = (int)$row['practical'];
@@ -37,6 +90,8 @@ function process_data_for_template(array $data): array{
         $seminar   = (int)$row['seminar'];
         $mustaqil  = (int)$row['mustaqilTalim'];
         $kursIshi  = (int)$row['kursIshi'];
+        $kursIshiFlag = (int)($row['kursIshiFlag'] ?? 0);
+        $kursIshiExtraFlag = (int)($row['kursIshiExtraFlag'] ?? 0);
         $malaka    = (int)$row['malakaAmaliyot'];
 
         $audTotal = $lecture + $practical + $lab + $seminar;
@@ -66,21 +121,29 @@ function process_data_for_template(array $data): array{
 
         if ($tanlovFan == 1) {
             if (isset($semesters[$semestrNum]['subjects'][$fanCode])) {
-                $semesters[$semestrNum]['subjects'][$fanCode]['variants'][] = [
-                    'name' => $row['fan_name'],
-                    'department' => $row['kafedra_name']
-                ];
+                // Izoh: Ishchi variantlar mavjud bo'lsa, bu yerda qayta append qilmaymiz.
+                if (empty($semesters[$semestrNum]['subjects'][$fanCode]['variants_locked'])) {
+                    $semesters[$semestrNum]['subjects'][$fanCode]['variants'][] = [
+                        'name' => $row['fan_name'],
+                        'department' => $row['kafedra_name']
+                    ];
+                }
             } else {
+                $variants = [];
+                if ($hasSelectedVariants) {
+                    $variants = $selectedVariants[$variantKey];
+                } else {
+                    $variants[] = [
+                        'name' => $row['fan_name'],
+                        'department' => $row['kafedra_name']
+                    ];
+                }
                 $semesters[$semestrNum]['subjects'][$fanCode] = [
                     'code' => $fanCode,
                     'name' => $row['fan_name'],
                     'isTanlovFan' => true,
-                    'variants' => [
-                        [
-                            'name' => $row['fan_name'],
-                            'department' => $row['kafedra_name']
-                        ]
-                    ],
+                    'variants' => $variants,
+                    'variants_locked' => $hasSelectedVariants,
                     'examType' => 'I',
                     'credit' => round($totalSoat / 30),
                     'totalHours' => $totalSoat,
@@ -93,6 +156,8 @@ function process_data_for_template(array $data): array{
                     ],
                     'malakaAmaliyot' => $malaka,
                     'kursIshi' => $kursIshi,
+                    'kursIshiFlag' => $kursIshiFlag,
+                    'kursIshiExtraFlag' => $kursIshiExtraFlag,
                     'mustaqilTalim' => $mustaqil,
                     'department' => $row['kafedra_name']
                 ];
@@ -114,6 +179,8 @@ function process_data_for_template(array $data): array{
                 ],
                 'malakaAmaliyot' => $malaka,
                 'kursIshi' => $kursIshi,
+                'kursIshiFlag' => $kursIshiFlag,
+                'kursIshiExtraFlag' => $kursIshiExtraFlag,
                 'mustaqilTalim' => $mustaqil,
                 'department' => $row['kafedra_name']
             ];
@@ -145,6 +212,7 @@ function process_data_for_template(array $data): array{
         ksort($semester['subjects']);
         foreach ($semester['subjects'] as &$subject) {
             unset($subject['totals_calculated']);
+            unset($subject['variants_locked']);
         }
         $semester['subjects'] = array_values($semester['subjects']);
     }
@@ -177,7 +245,7 @@ function process_data_for_template(array $data): array{
     ];
 }
 
-$data = process_data_for_template($oquv_rejalar);
+$data = process_data_for_template($oquv_rejalar, $selectedVariants);
 
 function renderSubjectCells($subject, $side = 'left') {
     if (!$subject) {
@@ -204,11 +272,13 @@ function renderSubjectCells($subject, $side = 'left') {
     
     if (isset($subject['isTanlovFan']) && $subject['isTanlovFan'] && isset($subject['variants'])) {
         $fanNomiHtml = '<ol class="tanlov-fan-list">';
-        
+
+        // Izoh: O'quv rejada tanlov fan variant nomlari ko'rsatilmaydi, har biri "Tanlov fan" deb chiqadi.
+        // Bu yerda nechta variant bo'lsa, shuncha band chiqaramiz.
         foreach ($subject['variants'] as $variant) {
-            $fanNomiHtml .= '<li>' . htmlspecialchars($variant['name']) . '</li>';
+            $fanNomiHtml .= '<li>Tanlov fan</li>';
         }
-        
+
         $fanNomiHtml .= '</ol>';
     } else {
         $fanNomiHtml = htmlspecialchars($subject['name']);
@@ -226,7 +296,7 @@ function renderSubjectCells($subject, $side = 'left') {
         <td>' . $subject['auditoriya']['lab'] . '</td>
         <td>' . $subject['auditoriya']['seminar'] . '</td>
         <td>' . ($subject['malakaAmaliyot'] ?? 0) . '</td>
-        <td>' . ($subject['kursIshi'] ?? 0) . '</td>
+        <td>' . (((($subject['kursIshi'] ?? 0) > 0) || (($subject['kursIshiFlag'] ?? 0) > 0) || (($subject['kursIshiExtraFlag'] ?? 0) > 0)) ? 'K' : '') . '</td>
         <td>' . $subject['mustaqilTalim'] . '</td>
     ';
 }
@@ -274,9 +344,9 @@ function renderSubjectCells($subject, $side = 'left') {
                         </select>
                         <select class="form-control" name="semestr" style="min-width:150px;" data-placeholder="Barcha semestrlar">
                             <option value="">Barcha semestrlar</option>
-                            <?php foreach ($semestrNumbers as $snum): ?>
-                                <option value="<?= $snum ?>" <?= (!empty($filters['semestr']) && (int)$filters['semestr'] === (int)$snum) ? 'selected' : '' ?>>
-                                    <?= $snum ?>-semestr
+                            <?php foreach ($semestrPairs as $pairStart): ?>
+                                <option value="<?= $pairStart ?>" <?= (!empty($filters['semestr']) && (int)$filters['semestr'] === (int)$pairStart) ? 'selected' : '' ?>>
+                                    <?= $pairStart ?>-<?= $pairStart + 1 ?>-semestr
                                 </option>
                             <?php endforeach; ?>
                         </select>
