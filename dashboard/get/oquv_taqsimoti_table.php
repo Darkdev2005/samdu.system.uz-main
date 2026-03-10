@@ -12,11 +12,6 @@ if (isset($_POST['semestr']) && !empty($_POST['semestr'])) {
 
 $oquv_taqsimotlar = $db->get_oquv_taqsimotlar($filters);
 $qoshimcha_oquv_taqsimotlar = $db->get_qoshimcha_oquv_taqsimotlar($filters);
-$pendingEvents = $db->get_data_by_table_all('taqsimot_resync_events', "WHERE status = 'pending'");
-$pendingYonalishMap = [];
-foreach ($pendingEvents as $ev) {
-    $pendingYonalishMap[(int)$ev['yonalish_id']] = true;
-}
 ?>
 <style>
     .full-soat {
@@ -153,7 +148,7 @@ foreach ($pendingEvents as $ev) {
                 }
                 if (!empty($oquv_taqsimotlar) || !empty($qoshimcha_oquv_taqsimotlar)):
                     foreach ($oquv_taqsimotlar as $row): 
-                        $needsResync = !empty($pendingYonalishMap[(int)($row['yonalish_id'] ?? 0)]);
+                        $needsResync = !empty($row['needs_resync']);
                         $taqsimlangan_maruza   = getTaqsimotSoat($db, $row['maruza_reja_id'] ?? 0);
                         
                         $taqsimlangan_amaliy   = getTaqsimotSoat($db, $row['amaliy_reja_id'] ?? 0);
@@ -252,7 +247,7 @@ foreach ($pendingEvents as $ev) {
                 <?php 
                     endforeach;
                     foreach ($qoshimcha_oquv_taqsimotlar as $row):
-                        $needsResync = !empty($pendingYonalishMap[(int)($row['yonalish_id'] ?? 0)]);
+                        $needsResync = !empty($row['needs_resync']);
                 ?>
                 <tr class="<?= $needsResync ? 'needs-resync' : '' ?>">
                     <td><?= $counter++ ?></td>

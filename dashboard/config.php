@@ -88,6 +88,100 @@ class Database{
                 UNIQUE KEY uniq_ishchi_variant (ishchi_reja_id, fan_id)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         ");
+
+        // Izoh: Yo'nalishlar tahriri tarixini saqlash uchun history jadvali.
+        mysqli_query($this->link, "
+            CREATE TABLE IF NOT EXISTS yonalishlar_history (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                yonalish_id INT NOT NULL,
+                name VARCHAR(255) NOT NULL,
+                code VARCHAR(255) NOT NULL,
+                muddati INT NOT NULL,
+                kirish_yili INT NOT NULL,
+                patok_soni INT NOT NULL,
+                kattaguruh_soni INT NOT NULL,
+                kichikguruh_soni INT NOT NULL,
+                akademik_daraja_id INT NOT NULL,
+                talim_shakli_id INT NOT NULL,
+                kvalifikatsiya VARCHAR(255) NOT NULL,
+                fakultet_id INT NOT NULL,
+                sync_status VARCHAR(20) NOT NULL DEFAULT 'nosync',
+                change_type VARCHAR(20) NOT NULL DEFAULT 'update',
+                changed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        ");
+
+        // Izoh: Guruhlar tahriri tarixini saqlash uchun history jadvali.
+        mysqli_query($this->link, "
+            CREATE TABLE IF NOT EXISTS guruhlar_history (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                guruh_id INT NOT NULL,
+                yonalish_id INT NOT NULL,
+                guruh_nomer VARCHAR(255) NOT NULL,
+                soni INT NOT NULL,
+                sync_status VARCHAR(20) NOT NULL DEFAULT 'nosync',
+                change_type VARCHAR(20) NOT NULL DEFAULT 'update',
+                changed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        ");
+
+        // Izoh: Tarix jadvallarida sync_status ustuni yo'q bo'lsa qo'shamiz.
+        $yonalishSyncCol = mysqli_query($this->link, "SHOW COLUMNS FROM yonalishlar_history LIKE 'sync_status'");
+        if ($yonalishSyncCol && mysqli_num_rows($yonalishSyncCol) === 0) {
+            mysqli_query($this->link, "ALTER TABLE yonalishlar_history ADD COLUMN sync_status VARCHAR(20) NOT NULL DEFAULT 'nosync' AFTER fakultet_id");
+        }
+
+        $guruhSyncCol = mysqli_query($this->link, "SHOW COLUMNS FROM guruhlar_history LIKE 'sync_status'");
+        if ($guruhSyncCol && mysqli_num_rows($guruhSyncCol) === 0) {
+            mysqli_query($this->link, "ALTER TABLE guruhlar_history ADD COLUMN sync_status VARCHAR(20) NOT NULL DEFAULT 'nosync' AFTER soni");
+        }
+
+        // Izoh: Qaysi yo'nalish qayta taqsimot talab qilishini kuzatish uchun event jadvali.
+        mysqli_query($this->link, "
+            CREATE TABLE IF NOT EXISTS taqsimot_resync_events (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                entity_type VARCHAR(20) NOT NULL,
+                entity_id INT NOT NULL,
+                yonalish_id INT NOT NULL,
+                reason TEXT NULL,
+                archived_rows INT NOT NULL DEFAULT 0,
+                status VARCHAR(20) NOT NULL DEFAULT 'pending',
+                create_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                done_at DATETIME NULL
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        ");
+
+        // Izoh: Taqsimotlar qayta hisoblashdan oldin arxivga olinadi.
+        mysqli_query($this->link, "
+            CREATE TABLE IF NOT EXISTS taqsimotlar_archive (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                taqsimot_id INT NOT NULL,
+                oquv_reja_id INT NOT NULL,
+                teacher_id INT NOT NULL,
+                soat DECIMAL(10,2) NOT NULL DEFAULT 0,
+                type VARCHAR(10) NOT NULL,
+                yonalish_id INT NOT NULL,
+                event_id INT NOT NULL DEFAULT 0,
+                entity_type VARCHAR(20) NOT NULL DEFAULT '',
+                entity_id INT NOT NULL DEFAULT 0,
+                archived_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        ");
+
+        // Izoh: O'chirilgan yo'nalishlardan qolib ketgan orphan semestrlarni avtomatik tozalaymiz.
+        $hasSemestrlar = mysqli_query($this->link, "SHOW TABLES LIKE 'semestrlar'");
+        if ($hasSemestrlar && mysqli_num_rows($hasSemestrlar) > 0) {
+            mysqli_query($this->link, "
+                DELETE s
+                FROM semestrlar s
+                LEFT JOIN yonalishlar y ON y.id = s.yonalish_id
+                WHERE y.id IS NULL
+                  AND NOT EXISTS (SELECT 1 FROM fanlar f WHERE f.semestr_id = s.id)
+                  AND NOT EXISTS (SELECT 1 FROM qoshimcha_fanlar qf WHERE qf.semestr_id = s.id)
+                  AND NOT EXISTS (SELECT 1 FROM umumtalim_fan_biriktirish ub WHERE ub.semestr_id = s.id)
+                  AND NOT EXISTS (SELECT 1 FROM chet_tili_guruhlar ct WHERE ct.semestr_id = s.id)
+            ");
+        }
     }
     public function query($query) {
         return mysqli_query($this->link, $query);
@@ -233,6 +327,7 @@ class Database{
             y.kirish_yili,
             y.talim_shakli_id,
             tsh.name AS talim_shakli_name,
+            ad.name AS akademik_daraja_name,
             y.patok_soni,
             y.kattaguruh_soni,
             y.kichikguruh_soni,
@@ -244,7 +339,10 @@ class Database{
         LEFT JOIN fakultetlar f ON f.id = s.fakultet_id
         LEFT JOIN yonalishlar y ON y.id = s.yonalish_id
         LEFT JOIN talim_shakllar tsh ON tsh.id = y.talim_shakli_id
+        LEFT JOIN akademik_darajalar ad ON ad.id = y.akademik_daraja_id
         LEFT JOIN guruhlar g ON g.yonalish_id = y.id
+        WHERE y.id IS NOT NULL
+          AND s.semestr <= (IFNULL(y.muddati, 0) * 2)
         GROUP BY
             s.id,
             f.name,
@@ -252,6 +350,7 @@ class Database{
             y.kirish_yili,
             y.talim_shakli_id,
             tsh.name,
+            ad.name,
             y.patok_soni,
             y.kattaguruh_soni,
             y.kichikguruh_soni,
@@ -288,7 +387,10 @@ class Database{
             $where[] = "y.id = " . (int)$filters['yonalish_id'];
         }
         if (!empty($filters['semestr'])) {
-            $where[] = "s.semestr = " . (int)$filters['semestr'];
+            $s = (int)$filters['semestr'];
+            $pairStart = ($s % 2 === 0) ? $s - 1 : $s;
+            $pairEnd = $pairStart + 1;
+            $where[] = "s.semestr IN ($pairStart, $pairEnd)";
         }
         $whereSQL = '';
         if (!empty($where)) {
@@ -312,6 +414,8 @@ class Database{
             SUM(CASE WHEN dst.id = 4 THEN o.dars_soat ELSE 0 END) AS seminar,
             SUM(CASE WHEN dst.id = 5 THEN o.dars_soat ELSE 0 END) AS mustaqilTalim,
             SUM(CASE WHEN dst.name = 'Kurs ishi' THEN o.dars_soat ELSE 0 END) AS kursIshi,
+            MAX(CASE WHEN dst.name = 'Kurs ishi' THEN 1 ELSE 0 END) AS kursIshiFlag,
+            COALESCE(qfext.kursIshiExtraFlag, 0) AS kursIshiExtraFlag,
             SUM(CASE WHEN dst.name = 'Malaka amaliyoti' THEN o.dars_soat ELSE 0 END) AS malakaAmaliyot
 
         FROM oquv_rejalar o
@@ -320,6 +424,14 @@ class Database{
         JOIN semestrlar s ON s.id = f.semestr_id
         JOIN yonalishlar y ON y.id = s.yonalish_id
         LEFT JOIN kafedralar k ON k.id = f.kafedra_id
+        LEFT JOIN (
+            SELECT
+                semestr_id,
+                fan_name,
+                MAX(CASE WHEN qoshimcha_dars_id = 1 THEN 1 ELSE 0 END) AS kursIshiExtraFlag
+            FROM qoshimcha_fanlar
+            GROUP BY semestr_id, fan_name
+        ) qfext ON qfext.semestr_id = f.semestr_id AND qfext.fan_name = f.fan_name
         $whereSQL
         GROUP BY
             f.id,
@@ -430,14 +542,55 @@ class Database{
     public function get_oquv_yuklamalar($filters = []){
         // Izoh: Filtrlar uchun SQL bo'laklari (kafedra va semestr).
         $filterKafedra = '';
+        $filterYonalish = '';
         $filterSemestr = '';
         $filterSemestrLecture = '';
+        $filterCurrentSemestr = '';
+        $filterCurrentLecture = '';
+        $filterSemestrType = '';
+        $filterSemestrTypeLecture = '';
+        $filterOquvYil = '';
+        $filterOquvYilLecture = '';
         if (!empty($filters['kafedra_id'])) {
             $filterKafedra = " AND k.id = " . (int)$filters['kafedra_id'];
+        }
+        if (!empty($filters['yonalish_id'])) {
+            $filterYonalish = " AND y.id = " . (int)$filters['yonalish_id'];
         }
         if (!empty($filters['semestr'])) {
             $filterSemestr = " AND s.semestr = " . (int)$filters['semestr'];
             $filterSemestrLecture = " AND ul.semestr = " . (int)$filters['semestr'];
+        } elseif (!empty($filters['oquv_yil_start'])) {
+            // Izoh: O'quv yili juftligi bo'yicha aniq semestrni hisoblash (semestr turi bo'lmasa joriy turini olamiz).
+            $startYear = (int)$filters['oquv_yil_start'];
+            $semType = !empty($filters['semestr_turi']) ? $filters['semestr_turi'] : '';
+            if ($semType !== 'fall' && $semType !== 'spring') {
+                $month = (int)date('n');
+                $semType = ($month >= 9 || $month === 1) ? 'fall' : 'spring';
+            }
+            $parityAdd = ($semType === 'fall') ? 1 : 2;
+            $semExpr = "GREATEST(1, LEAST(10, (({$startYear} - y.kirish_yili + 1) * 2) + " . ($parityAdd - 2) . "))";
+            $filterOquvYil = " AND s.semestr = {$semExpr}";
+            // Izoh: Umumta'lim ma'ruza CTE ichida y mavjud, shu yerda filter ishlatiladi.
+            $filterOquvYilLecture = '';
+        } elseif (!empty($filters['semestr_turi'])) {
+            // Izoh: Semestr turi bo'yicha filter (Kuzgi/Bahorgi).
+            if ($filters['semestr_turi'] === 'fall') {
+                $filterSemestrType = " AND MOD(s.semestr, 2) = 1";
+                $filterSemestrTypeLecture = " AND MOD(ul.semestr, 2) = 1";
+            } elseif ($filters['semestr_turi'] === 'spring') {
+                $filterSemestrType = " AND MOD(s.semestr, 2) = 0";
+                $filterSemestrTypeLecture = " AND MOD(ul.semestr, 2) = 0";
+            }
+        } else {
+            // Izoh: Semestr tanlanmasa, joriy yildagi joriy semestr bo'yicha filter.
+            $month = (int)date('n');
+            $year = (int)date('Y');
+            $isFall = ($month >= 9 || $month === 1);
+            $academicYearStart = ($month >= 9) ? $year : ($year - 1);
+            $parityAdd = $isFall ? 1 : 2; // kuzgi = toq, bahorgi = juft
+            $currentExpr = "GREATEST(1, LEAST(10, (({$academicYearStart} - y.kirish_yili) * 2) + {$parityAdd}))";
+            $filterCurrentSemestr = " AND s.semestr = {$currentExpr}";
         }
 
         // Izoh: Umumta'lim biriktirishda ma'ruza bitta, qolgan darslar yo'nalish bo'yicha alohida chiqishi uchun UNION ishlatiladi.
@@ -513,6 +666,10 @@ class Database{
                 JOIN yonalishlar y ON y.id = ub.yonalish_id
                 JOIN talim_shakllar tsh ON tsh.id = y.talim_shakli_id
                 JOIN guruhlar g ON g.yonalish_id = y.id
+                WHERE 1=1
+                $filterYonalish
+                $filterCurrentSemestr
+                $filterOquvYil
                 GROUP BY ub.umumtalim_fan_id, s.semestr
             )
 
@@ -565,6 +722,10 @@ class Database{
                 )
                 $filterKafedra
                 $filterSemestr
+                $filterYonalish
+                $filterCurrentSemestr
+                $filterSemestrType
+                $filterOquvYil
 
                 UNION ALL
 
@@ -605,6 +766,9 @@ class Database{
                 WHERE 1=1
                 $filterKafedra
                 $filterSemestrLecture
+                $filterSemestrTypeLecture
+                $filterOquvYilLecture
+                $filterCurrentLecture
 
                 UNION ALL
 
@@ -651,6 +815,10 @@ class Database{
                 WHERE fru.semestr = s.semestr
                 $filterKafedra
                 $filterSemestr
+                $filterYonalish
+                $filterCurrentSemestr
+                $filterSemestrType
+                $filterOquvYil
             ) AS yuklama
             ORDER BY yuklama.semestr, yuklama.fan_name;
         ";
@@ -663,11 +831,43 @@ class Database{
     }
     public function get_qoshimcha_oquv_yuklamalar($filters = []){
         $where = [];
+        $currentSemestrSQL = '';
         if (!empty($filters['kafedra_id'])) {
             $where[] = "k.id = " . (int)$filters['kafedra_id'];
         }
+        if (!empty($filters['yonalish_id'])) {
+            $where[] = "y.id = " . (int)$filters['yonalish_id'];
+        }
         if (!empty($filters['semestr'])) {
-            $where[] = "s.semestr = " . (int)$filters['semestr'];
+            $s = (int)$filters['semestr'];
+            $pairStart = ($s % 2 === 0) ? $s - 1 : $s;
+            $pairEnd = $pairStart + 1;
+            $where[] = "s.semestr IN ($pairStart, $pairEnd)";
+        } elseif (!empty($filters['oquv_yil_start'])) {
+            $startYear = (int)$filters['oquv_yil_start'];
+            $semType = !empty($filters['semestr_turi']) ? $filters['semestr_turi'] : '';
+            if ($semType !== 'fall' && $semType !== 'spring') {
+                $month = (int)date('n');
+                $semType = ($month >= 9 || $month === 1) ? 'fall' : 'spring';
+            }
+            $parityAdd = ($semType === 'fall') ? 1 : 2;
+            $semExpr = "GREATEST(1, LEAST(10, (({$startYear} - y.kirish_yili + 1) * 2) + " . ($parityAdd - 2) . "))";
+            $where[] = "s.semestr = {$semExpr}";
+        } elseif (!empty($filters['semestr_turi'])) {
+            if ($filters['semestr_turi'] === 'fall') {
+                $where[] = "MOD(s.semestr, 2) = 1";
+            } elseif ($filters['semestr_turi'] === 'spring') {
+                $where[] = "MOD(s.semestr, 2) = 0";
+            }
+        } else {
+            // Izoh: Semestr tanlanmasa, joriy yildagi joriy semestr bo'yicha filter.
+            $month = (int)date('n');
+            $year = (int)date('Y');
+            $isFall = ($month >= 9 || $month === 1);
+            $academicYearStart = ($month >= 9) ? $year : ($year - 1);
+            $parityAdd = $isFall ? 1 : 2;
+            $currentExpr = "GREATEST(1, LEAST(10, (({$academicYearStart} - y.kirish_yili) * 2) + {$parityAdd}))";
+            $where[] = "s.semestr = {$currentExpr}";
         }
         $whereSQL = '';
         if (!empty($where)) {
@@ -696,6 +896,7 @@ class Database{
                 ga.guruh_raqami,
                 ga.guruhlar_soni,
                 ga.talabalar_soni,
+                qf.fan_soat AS fan_soat,
                 SUM(CASE WHEN qdt.id = 20 THEN q.dars_soati ELSE 0 END) AS oraliq_nazorat,
                 SUM(CASE WHEN qdt.id = 21 THEN q.dars_soati ELSE 0 END) AS yakuniy_nazorat,
                 y.patok_soni,
@@ -763,7 +964,10 @@ class Database{
             $where[] = "k.id = " . (int)$filters['kafedra_id'];
         }
         if (!empty($filters['semestr'])) {
-            $where[] = "s.semestr = " . (int)$filters['semestr'];
+            $s = (int)$filters['semestr'];
+            $pairStart = ($s % 2 === 0) ? $s - 1 : $s;
+            $pairEnd = $pairStart + 1;
+            $where[] = "s.semestr IN ($pairStart, $pairEnd)";
         }
         $whereSQL = '';
         if (!empty($where)) {
@@ -805,6 +1009,7 @@ class Database{
             fr.amaliy_reja_id,
             fr.laboratoriya_reja_id,
             fr.seminar_reja_id,
+            y.id AS yonalish_id,
             fr.fan_name AS fan_nomi,
             y.name AS talim_yonalishi,
             y.code AS yonalish_code,
@@ -818,6 +1023,12 @@ class Database{
             y.patok_soni,
             y.kattaguruh_soni,
             y.kichikguruh_soni,
+            EXISTS (
+                SELECT 1
+                FROM taqsimot_resync_events tre
+                WHERE tre.yonalish_id = y.id
+                  AND tre.status = 'pending'
+            ) AS needs_resync,
             fr.maruza_soat AS reja_maruz,
             fr.amaliy_soat AS reja_amaliy,
             fr.laboratoriya_soat AS reja_laboratoriya,
@@ -875,6 +1086,7 @@ class Database{
             )
             SELECT
                 q.id AS qoshimcha_reja_id, 
+                y.id AS yonalish_id,
                 qf.fan_name AS fan_nomi,
                 y.name AS talim_yonalishi,
                 y.code AS yonalish_code,
@@ -891,6 +1103,12 @@ class Database{
                 y.patok_soni,
                 y.kattaguruh_soni,
                 y.kichikguruh_soni,
+                EXISTS (
+                    SELECT 1
+                    FROM taqsimot_resync_events tre
+                    WHERE tre.yonalish_id = y.id
+                      AND tre.status = 'pending'
+                ) AS needs_resync,
                 CASE WHEN qf.qoshimcha_dars_id = 1  THEN q.dars_soati ELSE 0 END AS kurs_ishi,
                 CASE WHEN qf.qoshimcha_dars_id = 2  THEN q.dars_soati ELSE 0 END AS kurs_loyiha,
                 CASE WHEN qf.qoshimcha_dars_id = 3  THEN q.dars_soati ELSE 0 END AS oquv_ped_amaliyot,
@@ -928,6 +1146,57 @@ class Database{
         }
         return $data;
 
+    }
+    public function get_yunalishlar_history_with_details(){
+        $sql = "SELECT
+            yh.id,
+            yh.yonalish_id,
+            yh.name AS yonalish_nomi,
+            yh.code AS yonalish_kodi,
+            yh.muddati AS talim_muddati,
+            yh.kirish_yili,
+            yh.patok_soni,
+            yh.kattaguruh_soni,
+            yh.kichikguruh_soni,
+            ad.name AS akademik_daraja,
+            ts.name AS talim_shakli,
+            yh.kvalifikatsiya,
+            f.name AS fakultet,
+            yh.sync_status,
+            yh.change_type,
+            yh.changed_at
+        FROM yonalishlar_history yh
+        LEFT JOIN akademik_darajalar ad ON yh.akademik_daraja_id = ad.id
+        LEFT JOIN talim_shakllar ts ON yh.talim_shakli_id = ts.id
+        LEFT JOIN fakultetlar f ON yh.fakultet_id = f.id
+        ORDER BY yh.id DESC";
+        $result = $this->query($sql);
+        $data = [];
+        while ($row = mysqli_fetch_assoc($result)) {
+            $data[] = $row;
+        }
+        return $data;
+    }
+    public function get_guruhlar_history(){
+        $sql = "SELECT
+            gh.id,
+            gh.guruh_id,
+            gh.yonalish_id,
+            gh.guruh_nomer,
+            gh.soni,
+            gh.sync_status,
+            gh.change_type,
+            gh.changed_at,
+            y.name AS yonalish_name
+        FROM guruhlar_history gh
+        LEFT JOIN yonalishlar y ON y.id = gh.yonalish_id
+        ORDER BY gh.id DESC";
+        $result = $this->query($sql);
+        $data = [];
+        while ($row = mysqli_fetch_assoc($result)) {
+            $data[] = $row;
+        }
+        return $data;
     }
 
     public function get_oqituvchi_taqsimotlar($filters = []){
@@ -991,6 +1260,60 @@ class Database{
         $result = $this->query($sql);
         $data = [];
         while ($row = mysqli_fetch_assoc($result)) {
+            // Izoh: Qo'shimcha yuklama soatlarini talaba soni asosida avtomatik hisoblash.
+            $talaba = (int)($row['talabalar_soni'] ?? 0);
+            $fanSoat = (float)($row['fan_soat'] ?? 0);
+            $shakl = mb_strtolower(trim($row['oquv_shakli'] ?? ''), 'UTF-8');
+            $isExternal = (strpos($shakl, 'sirtqi') !== false) || (strpos($shakl, 'masof') !== false) || (strpos($shakl, 'kechki') !== false);
+
+            if (($row['oraliq_nazorat'] ?? 0) <= 0 && $talaba > 0) {
+                if ($isExternal) {
+                    $row['oraliq_nazorat'] = 0;
+                } elseif ($fanSoat >= 60) {
+                    $row['oraliq_nazorat'] = round($talaba * 0.4);
+                } elseif ($fanSoat >= 30) {
+                    $row['oraliq_nazorat'] = round($talaba * 0.2);
+                } else {
+                    $row['oraliq_nazorat'] = 0;
+                }
+            }
+
+            if (($row['yakuniy_nazorat'] ?? 0) <= 0 && $talaba > 0) {
+                $row['yakuniy_nazorat'] = $isExternal ? 0 : round($talaba * 0.3);
+            }
+
+            if (($row['kurs_ishi'] ?? 0) <= 0 && $talaba > 0) {
+                $row['kurs_ishi'] = round($talaba * 2.4);
+            }
+            if (($row['kurs_loyiha'] ?? 0) <= 0 && $talaba > 0) {
+                $row['kurs_loyiha'] = round($talaba * 3.6);
+            }
+            if (($row['uzluksiz_malakaviy'] ?? 0) <= 0 && $talaba > 0) {
+                $row['uzluksiz_malakaviy'] = round($talaba * ($isExternal ? 0.4 : 2));
+            }
+
+            // Izoh: Jami soatni qayta hisoblaymiz (faqat hisoblangan/saqlangan qiymatlar).
+            $row['jami_soat'] =
+                (float)($row['oraliq_nazorat'] ?? 0) +
+                (float)($row['yakuniy_nazorat'] ?? 0) +
+                (float)($row['kurs_ishi'] ?? 0) +
+                (float)($row['kurs_loyiha'] ?? 0) +
+                (float)($row['oquv_ped_amaliyot'] ?? 0) +
+                (float)($row['uzluksiz_malakaviy'] ?? 0) +
+                (float)($row['dala_amaliyoti_otm'] ?? 0) +
+                (float)($row['dala_amaliyoti_tashqarida'] ?? 0) +
+                (float)($row['ishlab_chiqarish'] ?? 0) +
+                (float)($row['bmi_rahbarligi'] ?? 0) +
+                (float)($row['ilmiy_tadqiqot_ishi'] ?? 0) +
+                (float)($row['ilmiy_pedagogik_ishi'] ?? 0) +
+                (float)($row['ilmiy_stajirovka'] ?? 0) +
+                (float)($row['tayanch_doktorantura'] ?? 0) +
+                (float)($row['katta_ilmiy_tadqiqotchi'] ?? 0) +
+                (float)($row['stajyor_tadqiqotchi'] ?? 0) +
+                (float)($row['ochiq_dars'] ?? 0) +
+                (float)($row['yadak'] ?? 0) +
+                (float)($row['boshqa_soatlar'] ?? 0);
+
             $data[] = $row;
         }
         return $data;
