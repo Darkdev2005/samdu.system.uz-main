@@ -130,10 +130,26 @@ class Database{
         if ($yonalishSyncCol && mysqli_num_rows($yonalishSyncCol) === 0) {
             mysqli_query($this->link, "ALTER TABLE yonalishlar_history ADD COLUMN sync_status VARCHAR(20) NOT NULL DEFAULT 'nosync' AFTER fakultet_id");
         }
+        $yonalishChangeTypeCol = mysqli_query($this->link, "SHOW COLUMNS FROM yonalishlar_history LIKE 'change_type'");
+        if ($yonalishChangeTypeCol && mysqli_num_rows($yonalishChangeTypeCol) === 0) {
+            mysqli_query($this->link, "ALTER TABLE yonalishlar_history ADD COLUMN change_type VARCHAR(20) NOT NULL DEFAULT 'update' AFTER sync_status");
+        }
+        $yonalishChangedAtCol = mysqli_query($this->link, "SHOW COLUMNS FROM yonalishlar_history LIKE 'changed_at'");
+        if ($yonalishChangedAtCol && mysqli_num_rows($yonalishChangedAtCol) === 0) {
+            mysqli_query($this->link, "ALTER TABLE yonalishlar_history ADD COLUMN changed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP");
+        }
 
         $guruhSyncCol = mysqli_query($this->link, "SHOW COLUMNS FROM guruhlar_history LIKE 'sync_status'");
         if ($guruhSyncCol && mysqli_num_rows($guruhSyncCol) === 0) {
             mysqli_query($this->link, "ALTER TABLE guruhlar_history ADD COLUMN sync_status VARCHAR(20) NOT NULL DEFAULT 'nosync' AFTER soni");
+        }
+        $guruhChangeTypeCol = mysqli_query($this->link, "SHOW COLUMNS FROM guruhlar_history LIKE 'change_type'");
+        if ($guruhChangeTypeCol && mysqli_num_rows($guruhChangeTypeCol) === 0) {
+            mysqli_query($this->link, "ALTER TABLE guruhlar_history ADD COLUMN change_type VARCHAR(20) NOT NULL DEFAULT 'update' AFTER sync_status");
+        }
+        $guruhChangedAtCol = mysqli_query($this->link, "SHOW COLUMNS FROM guruhlar_history LIKE 'changed_at'");
+        if ($guruhChangedAtCol && mysqli_num_rows($guruhChangedAtCol) === 0) {
+            mysqli_query($this->link, "ALTER TABLE guruhlar_history ADD COLUMN changed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP");
         }
 
         // Izoh: Qaysi yo'nalish qayta taqsimot talab qilishini kuzatish uchun event jadvali.
@@ -150,6 +166,14 @@ class Database{
                 done_at DATETIME NULL
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         ");
+        $resyncStatusCol = mysqli_query($this->link, "SHOW COLUMNS FROM taqsimot_resync_events LIKE 'status'");
+        if ($resyncStatusCol && mysqli_num_rows($resyncStatusCol) === 0) {
+            mysqli_query($this->link, "ALTER TABLE taqsimot_resync_events ADD COLUMN status VARCHAR(20) NOT NULL DEFAULT 'pending' AFTER archived_rows");
+        }
+        $resyncDoneAtCol = mysqli_query($this->link, "SHOW COLUMNS FROM taqsimot_resync_events LIKE 'done_at'");
+        if ($resyncDoneAtCol && mysqli_num_rows($resyncDoneAtCol) === 0) {
+            mysqli_query($this->link, "ALTER TABLE taqsimot_resync_events ADD COLUMN done_at DATETIME NULL");
+        }
 
         // Izoh: Taqsimotlar qayta hisoblashdan oldin arxivga olinadi.
         mysqli_query($this->link, "
@@ -167,6 +191,14 @@ class Database{
                 archived_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         ");
+        $archiveEntityTypeCol = mysqli_query($this->link, "SHOW COLUMNS FROM taqsimotlar_archive LIKE 'entity_type'");
+        if ($archiveEntityTypeCol && mysqli_num_rows($archiveEntityTypeCol) === 0) {
+            mysqli_query($this->link, "ALTER TABLE taqsimotlar_archive ADD COLUMN entity_type VARCHAR(20) NOT NULL DEFAULT '' AFTER event_id");
+        }
+        $archiveEntityIdCol = mysqli_query($this->link, "SHOW COLUMNS FROM taqsimotlar_archive LIKE 'entity_id'");
+        if ($archiveEntityIdCol && mysqli_num_rows($archiveEntityIdCol) === 0) {
+            mysqli_query($this->link, "ALTER TABLE taqsimotlar_archive ADD COLUMN entity_id INT NOT NULL DEFAULT 0 AFTER entity_type");
+        }
 
         // Izoh: O'chirilgan yo'nalishlardan qolib ketgan orphan semestrlarni avtomatik tozalaymiz.
         $hasSemestrlar = mysqli_query($this->link, "SHOW TABLES LIKE 'semestrlar'");

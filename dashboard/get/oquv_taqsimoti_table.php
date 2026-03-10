@@ -12,6 +12,28 @@ if (isset($_POST['semestr']) && !empty($_POST['semestr'])) {
 
 $oquv_taqsimotlar = $db->get_oquv_taqsimotlar($filters);
 $qoshimcha_oquv_taqsimotlar = $db->get_qoshimcha_oquv_taqsimotlar($filters);
+
+// Izoh: config.php dagi ayrim eski versiyalarda needs_resync SELECTda bo'lmasligi mumkin.
+// Shu holatda fallback sifatida pending eventlarni yonalish_id bo'yicha shu faylda tekshiramiz.
+$pendingYonalishMap = [];
+$allYonalishIds = [];
+foreach ([$oquv_taqsimotlar, $qoshimcha_oquv_taqsimotlar] as $rows) {
+    foreach ($rows as $r) {
+        if (!empty($r['yonalish_id'])) {
+            $allYonalishIds[] = (int)$r['yonalish_id'];
+        }
+    }
+}
+$allYonalishIds = array_values(array_unique(array_filter($allYonalishIds)));
+if (!empty($allYonalishIds)) {
+    $pendingRows = $db->get_data_by_table_all(
+        'taqsimot_resync_events',
+        "WHERE status='pending' AND yonalish_id IN (" . implode(',', $allYonalishIds) . ")"
+    );
+    foreach ($pendingRows as $pr) {
+        $pendingYonalishMap[(int)$pr['yonalish_id']] = true;
+    }
+}
 ?>
 <style>
     .full-soat {
@@ -149,6 +171,10 @@ $qoshimcha_oquv_taqsimotlar = $db->get_qoshimcha_oquv_taqsimotlar($filters);
                 if (!empty($oquv_taqsimotlar) || !empty($qoshimcha_oquv_taqsimotlar)):
                     foreach ($oquv_taqsimotlar as $row): 
                         $needsResync = !empty($row['needs_resync']);
+                        $rowYonalishId = !empty($row['yonalish_id']) ? (int)$row['yonalish_id'] : 0;
+                        if (!$needsResync && $rowYonalishId > 0 && !empty($pendingYonalishMap[$rowYonalishId])) {
+                            $needsResync = true;
+                        }
                         $taqsimlangan_maruza   = getTaqsimotSoat($db, $row['maruza_reja_id'] ?? 0);
                         
                         $taqsimlangan_amaliy   = getTaqsimotSoat($db, $row['amaliy_reja_id'] ?? 0);
@@ -248,6 +274,10 @@ $qoshimcha_oquv_taqsimotlar = $db->get_qoshimcha_oquv_taqsimotlar($filters);
                     endforeach;
                     foreach ($qoshimcha_oquv_taqsimotlar as $row):
                         $needsResync = !empty($row['needs_resync']);
+                        $rowYonalishId = !empty($row['yonalish_id']) ? (int)$row['yonalish_id'] : 0;
+                        if (!$needsResync && $rowYonalishId > 0 && !empty($pendingYonalishMap[$rowYonalishId])) {
+                            $needsResync = true;
+                        }
                 ?>
                 <tr class="<?= $needsResync ? 'needs-resync' : '' ?>">
                     <td><?= $counter++ ?></td>
