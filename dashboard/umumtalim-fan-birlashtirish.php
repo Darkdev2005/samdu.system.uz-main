@@ -322,19 +322,7 @@
             });
         });
 
-        // Izoh: Birinchi tanlangan fan master deb belgilanadi.
-        $(document).on('select2:select', '.fan-select', function(e) {
-            const selectedId = e?.params?.data?.id || $(this).val() || '';
-            if (!selectedId) return;
-            const masterInput = $('#masterFanId');
-            if (!masterInput.val()) {
-                masterInput.val(selectedId);
-            }
-        });
-
-        $(document).on('select2:clear', '.fan-select', function() {
-            // Izoh: Agar master hali o'rnatilmagan bo'lsa, bo'sh qoladi.
-        });
+        // Izoh: Master fan doim birinchi qatordagi fan bo'ladi (submit paytida qayta hisoblanadi).
 
         // Izoh: Yo'nalish+semestr selectini to'ldirish.
         function fillYonalishOptions(select) {
@@ -544,6 +532,9 @@
 
             const formData = new FormData();
             const masterInput = $('#masterFanId');
+            const rows = $('#yonalishWrapper .yonalish-item');
+            const firstFanId = rows.first().find('.fan-select').val();
+            masterInput.val(firstFanId || '');
 
             let hasError = false;
             $('#yonalishWrapper .yonalish-item').each(function() {
@@ -553,10 +544,6 @@
                 if (!semestrId || !fanId) {
                     hasError = true;
                     return false;
-                }
-
-                if (!masterInput.val()) {
-                    masterInput.val(fanId);
                 }
 
                 formData.append('semestr_ids[]', semestrId);
@@ -588,7 +575,6 @@
                     $('#yonalishWrapper .yonalish-select').val(null).trigger('change');
                     $('.fan-select').val(null).trigger('change');
                     $('#masterFanId').val('');
-                    $('#yonalishWrapper .source-fan-input').val('');
                     // Izoh: Biriktirilgan fanlar ro'yxati ko'rinishi uchun sahifani yangilaymiz.
                     setTimeout(() => {
                         window.location.reload();

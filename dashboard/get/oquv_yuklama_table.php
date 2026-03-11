@@ -160,7 +160,25 @@ $qoshimcha_yuklamalar = $db->get_qoshimcha_oquv_yuklamalar($filters);
                 <tr>
                     <td><?= $counter++ ?></td>
                     <td class="left"><?= htmlspecialchars($row['fan_name']) ?></td>
-                    <td class="left"><?= htmlspecialchars($row['yonalish_code'] . ' – ' . $row['talim_yonalishi']) ?></td>
+                    <td class="left">
+                        <?php
+                            $isBirlashtirilgan = !empty($row['is_birlashtirilgan']) && !empty($row['biriktirilgan_yonalishlar']);
+                            if ($isBirlashtirilgan) {
+                                $bCode = trim((string)($row['biriktirilgan_yonalish_code'] ?? ''));
+                                $bName = trim((string)($row['biriktirilgan_yonalishlar'] ?? ''));
+                                if ($bCode !== '' && $bName !== '') {
+                                    $talimYonalishiText = $bCode . ' - ' . $bName;
+                                } elseif ($bName !== '') {
+                                    $talimYonalishiText = $bName;
+                                } else {
+                                    $talimYonalishiText = $bCode;
+                                }
+                            } else {
+                                $talimYonalishiText = trim((string)($row['yonalish_code'] ?? '')) . ' - ' . trim((string)($row['talim_yonalishi'] ?? ''));
+                            }
+                        ?>
+                        <?= htmlspecialchars($talimYonalishiText) ?>
+                    </td>
                     <td><?= htmlspecialchars($row['guruh_raqami']) ?></td>
                     <td><?= $row['oquv_shakli'] ?></td>
                     <td><?= $row['kurs'] ?></td>
@@ -236,7 +254,7 @@ $qoshimcha_yuklamalar = $db->get_qoshimcha_oquv_yuklamalar($filters);
                 <tr>
                     <td><?= $counter++ ?></td>
                     <td class="left"><?= htmlspecialchars($row['fan_nomi']) ?></td>
-                    <td class="left"><?= htmlspecialchars($row['yonalish_code'] . ' – ' . $row['talim_yonalishi']) ?></td>
+                    <td class="left"><?= htmlspecialchars($row['yonalish_code'] . ' - ' . $row['talim_yonalishi']) ?></td>
                     <td><?= htmlspecialchars($row['guruh_raqami']) ?></td>
                     <td><?= $row['oquv_shakli'] ?></td>
                     <td><?= $row['kurs'] ?></td>

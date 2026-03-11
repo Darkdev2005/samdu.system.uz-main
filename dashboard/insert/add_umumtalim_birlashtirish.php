@@ -21,6 +21,7 @@
 
     // Izoh: Birinchi tanlangan fan (fanlar jadvalidagi ID) master bo'ladi.
     $rows = [];
+    $seenSemestrIds = [];
 
     for ($i = 0; $i < count($semestrIdsRaw); $i++) {
         $semestrId = (int) ($semestrIdsRaw[$i] ?? 0);
@@ -34,6 +35,12 @@
             echo json_encode(['success' => false, 'message' => 'Yo\'nalish+semestr va fan tanlanishi shart']);
             exit;
         }
+
+        if (isset($seenSemestrIds[$semestrId])) {
+            echo json_encode(['success' => false, 'message' => 'Bir xil yo\'nalish+semestr qayta tanlangan']);
+            exit;
+        }
+        $seenSemestrIds[$semestrId] = true;
 
         if ($masterFanId <= 0) {
             $masterFanId = $sourceFanId;
@@ -85,6 +92,14 @@
         exit;
     }
 
+    $masterFanCode = trim((string) ($masterFanRow['fan_code'] ?? ''));
+    $masterFanName = trim((string) ($masterFanRow['fan_name'] ?? ''));
+
+    if ($masterFanCode === '' || $masterFanName === '') {
+        echo json_encode(['success' => false, 'message' => 'Master fan ma\'lumoti to\'liq emas']);
+        exit;
+    }
+
     foreach ($rows as $row) {
         $semestrId = (int) $row['semestr_id'];
         $semestr = $db->get_data_by_table('semestrlar', [
@@ -94,6 +109,11 @@
         if (!$semestr) {
             continue;
         }
+        $semestrNumForRow = (int) ($semestr['semestr'] ?? 0);
+        if ($semestrNumForRow !== $semestrNum) {
+            echo json_encode(['success' => false, 'message' => 'Faqat bir xil semestr raqami ichida biriktirish mumkin']);
+            exit;
+        }
 
         $yonalishId = (int) ($semestr['yonalish_id'] ?? 0);
         if ($yonalishId <= 0) {
@@ -101,6 +121,26 @@
         }
 
         $sourceFanId = (int) $row['source_fan_id']; // fanlar jadvalidagi ID
+        $sourceFanRow = $db->get_data_by_table('fanlar', [
+            'id' => $sourceFanId
+        ]);
+        if (!$sourceFanRow) {
+            echo json_encode(['success' => false, 'message' => 'Tanlangan fan topilmadi']);
+            exit;
+        }
+
+        $sourceSemestrId = (int) ($sourceFanRow['semestr_id'] ?? 0);
+        if ($sourceSemestrId !== $semestrId) {
+            echo json_encode(['success' => false, 'message' => 'Fan tanlovi yo\'nalish+semestrga mos emas']);
+            exit;
+        }
+
+        $sourceCode = trim((string) ($sourceFanRow['fan_code'] ?? ''));
+        $sourceName = trim((string) ($sourceFanRow['fan_name'] ?? ''));
+        if ($sourceCode !== $masterFanCode || $sourceName !== $masterFanName) {
+            echo json_encode(['success' => false, 'message' => 'Faqat bir xil fan (kod+nom) biriktirilishi mumkin']);
+            exit;
+        }
 
         // Izoh: umumtalim_fan_id faqat master (umumtalim_fanlar ID), source_fan_id esa fanlar jadvalidagi ID.
         $db->query("

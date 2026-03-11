@@ -66,6 +66,9 @@ if (!empty($allYonalishIds)) {
     color: #fff;
     background: #dc3545;
 }
+.guruh-cell {
+    white-space: nowrap;
+}
 
 </style>
 <div class="table-container-wrapper">
@@ -192,7 +195,7 @@ if (!empty($allYonalishIds)) {
                             <div class="resync-badge">Qayta taqsimot kerak</div>
                         <?php endif; ?>
                     </td>
-                    <td><?= htmlspecialchars($row['guruh_raqami']) ?></td>
+                    <td class="guruh-cell"><?= htmlspecialchars($row['guruh_raqami']) ?></td>
                     <td><?= $row['oquv_shakli'] ?></td>
                     <td><?= $row['kurs'] ?></td>
                     <td><?= $row['semestr'] ?></td>
@@ -288,7 +291,7 @@ if (!empty($allYonalishIds)) {
                             <div class="resync-badge">Qayta taqsimot kerak</div>
                         <?php endif; ?>
                     </td>
-                    <td><?= htmlspecialchars($row['guruh_raqami']) ?></td>
+                    <td class="guruh-cell"><?= htmlspecialchars($row['guruh_raqami']) ?></td>
                     <td><?= $row['oquv_shakli'] ?></td>
                     <td><?= $row['kurs'] ?></td>
                     <td><?= $row['semestr'] ?></td>
